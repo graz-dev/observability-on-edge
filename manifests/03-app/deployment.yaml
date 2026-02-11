@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: noise-generator
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: noise-generator
+  template:
+    metadata:
+      labels:
+        app: noise-generator
+    spec:
+      containers:
+        - name: noise-generator
+          image: noise-generator:latest
+          imagePullPolicy: Never # Use local imported image
+          env:
+            - name: HOST_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: COLLECTOR_ENDPOINT
+              value: "$(HOST_IP):4317" # Talk to DaemonSet on Host port
+          ports:
+            - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: noise-generator
+  namespace: default
+spec:
+  selector:
+    app: noise-generator
+  ports:
+    - port: 8080
+      targetPort: 8080

@@ -1,0 +1,129 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: edge-collector
+  namespace: default
+  labels:
+    app: edge-collector
+spec:
+  selector:
+    matchLabels:
+      app: edge-collector
+  template:
+    metadata:
+      labels:
+        app: edge-collector
+    spec:
+      serviceAccountName: edge-collector-sa
+      initContainers:
+        - name: init-fs
+          image: busybox
+          command: ["sh", "-c", "chown -R 10001:10001 /var/lib/otelcol && chmod 777 /var/lib/otelcol"]
+          volumeMounts:
+            - name: otel-storage
+              mountPath: /var/lib/otelcol
+      containers:
+        # 1. OpenTelemetry Collector
+        - name: otel-collector
+          image: otel/opentelemetry-collector-contrib:latest
+          args:
+            - "--config=/conf/config.yaml"
+          resources:
+            limits:
+              cpu: 200m
+              memory: 200Mi # Give it room, but OTel logic enforces 60MB
+            requests:
+              cpu: 100m
+              memory: 100Mi
+          env:
+            - name: HOST_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+          volumeMounts:
+            - name: otel-config
+              mountPath: /conf
+            - name: otel-storage
+              mountPath: /var/lib/otelcol
+          ports:
+            - containerPort: 4317 # OTLP gRPC
+              hostPort: 4317
+            - containerPort: 4318 # OTLP HTTP
+              hostPort: 4318
+            - containerPort: 8888 # Internal Metrics
+              hostPort: 8888
+            - containerPort: 8889 # Prometheus Exporter
+              hostPort: 8889
+        
+        # 2. Fluent Bit
+        - name: fluent-bit
+          image: fluent/fluent-bit:latest
+          resources:
+            limits:
+              cpu: 100m
+              memory: 100Mi
+            requests:
+              cpu: 50m
+              memory: 50Mi
+          volumeMounts:
+            - name: fluent-bit-config
+              mountPath: /fluent-bit/etc/
+            - name: varlog
+              mountPath: /var/log
+            - name: varlibdockercontainers
+              mountPath: /var/lib/docker/containers
+              readOnly: true
+      
+      volumes:
+        - name: otel-config
+          configMap:
+            name: otel-collector-config
+        - name: fluent-bit-config
+          configMap:
+            name: fluent-bit-config
+        - name: otel-storage
+          hostPath:
+            path: /var/lib/otelcol
+            type: DirectoryOrCreate
+        - name: varlog
+          hostPath:
+            path: /var/log
+        - name: varlibdockercontainers
+          hostPath:
+            path: /var/lib/docker/containers
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: edge-collector-sa
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: edge-collector-role
+rules:
+  # Permissions for OTel (k8sattributes definition if used, or prometheus scraping)
+  - apiGroups: [""]
+    resources: ["nodes", "nodes/proxy", "nodes/stats", "nodes/metrics", "services", "endpoints", "pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["extensions"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch"]
+  # Permissions for Fluent Bit
+  - apiGroups: [""]
+    resources: ["namespaces", "pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: edge-collector-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: edge-collector-role
+subjects:
+  - kind: ServiceAccount
+    name: edge-collector-sa
+    namespace: default
