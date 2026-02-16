@@ -1,0 +1,47 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'edge-observability'
+    environment: 'demo'
+
+# Enable remote write receiver
+remote_write:
+  - url: http://localhost:9090/api/v1/write
+
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # OTel Collector metrics
+  - job_name: 'otel-collector'
+    static_configs:
+      - targets: ['otel-collector.observability.svc.cluster.local:8888']
+        labels:
+          component: 'otel-collector'
+          node_role: 'edge'
+
+  # Fluent Bit metrics
+  - job_name: 'fluent-bit'
+    static_configs:
+      - targets: ['fluent-bit.observability.svc.cluster.local:2020']
+        labels:
+          component: 'fluent-bit'
+          node_role: 'edge'
+
+  # Edge demo app (if it exposes metrics endpoint)
+  - job_name: 'edge-demo-app'
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+            - observability
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        action: keep
+        regex: edge-demo-app
+      - source_labels: [__meta_kubernetes_pod_container_port_name]
+        action: keep
+        regex: metrics

@@ -1,0 +1,122 @@
+#!/bin/bash
+
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+echo -e "${GREEN}🚀 Edge Observability Demo - Setup${NC}"
+echo "=========================================="
+
+# Check prerequisites
+echo -e "\n${YELLOW}📋 Checking prerequisites...${NC}"
+
+command -v docker >/dev/null 2>&1 || { echo -e "${RED}❌ docker is required but not installed.${NC}" >&2; exit 1; }
+command -v k3d >/dev/null 2>&1 || { echo -e "${RED}❌ k3d is required but not installed.${NC}" >&2; exit 1; }
+command -v kubectl >/dev/null 2>&1 || { echo -e "${RED}❌ kubectl is required but not installed.${NC}" >&2; exit 1; }
+
+echo -e "${GREEN}✓ All prerequisites installed${NC}"
+
+# Build application Docker image
+echo -e "\n${YELLOW}🏗️  Building application Docker image...${NC}"
+cd app
+docker build -t edge-demo-app:latest .
+cd ..
+echo -e "${GREEN}✓ Application image built${NC}"
+
+# Create k3d cluster with 2 nodes
+echo -e "\n${YELLOW}☸️  Creating k3d cluster with 2 nodes...${NC}"
+
+# Delete cluster if it exists
+k3d cluster delete edge-observability 2>/dev/null || true
+
+# Create cluster with 2 agents (worker nodes)
+k3d cluster create edge-observability \
+  --agents 2 \
+  --port "30300:30300@server:0" \
+  --port "30686:30686@server:0" \
+  --wait
+
+echo -e "${GREEN}✓ Cluster created${NC}"
+
+# Wait for cluster to be ready
+echo -e "\n${YELLOW}⏳ Waiting for cluster to be ready...${NC}"
+kubectl wait --for=condition=Ready nodes --all --timeout=120s
+
+# Label nodes
+echo -e "\n${YELLOW}🏷️  Labeling nodes...${NC}"
+NODES=($(kubectl get nodes -o name | grep agent))
+
+if [ ${#NODES[@]} -lt 2 ]; then
+  echo -e "${RED}❌ Expected 2 agent nodes, found ${#NODES[@]}${NC}"
+  exit 1
+fi
+
+kubectl label ${NODES[0]} node-role=edge --overwrite
+kubectl label ${NODES[1]} node-role=hub --overwrite
+
+echo -e "${GREEN}✓ Nodes labeled${NC}"
+echo "  - ${NODES[0]} = edge"
+echo "  - ${NODES[1]} = hub"
+
+# Import application image to k3d
+echo -e "\n${YELLOW}📦 Importing application image to k3d...${NC}"
+k3d image import edge-demo-app:latest -c edge-observability
+echo -e "${GREEN}✓ Image imported${NC}"
+
+# Create namespace
+echo -e "\n${YELLOW}📁 Creating namespace...${NC}"
+kubectl apply -f k8s/namespace.yaml
+echo -e "${GREEN}✓ Namespace created${NC}"
+
+# Deploy hub node components first (backends)
+echo -e "\n${YELLOW}🎯 Deploying hub node components (backends)...${NC}"
+kubectl apply -f k8s/hub-node/
+
+echo -e "${YELLOW}⏳ Waiting for hub components to be ready...${NC}"
+kubectl wait --for=condition=ready pod -l app=jaeger -n observability --timeout=300s
+kubectl wait --for=condition=ready pod -l app=prometheus -n observability --timeout=300s
+kubectl wait --for=condition=ready pod -l app=loki -n observability --timeout=300s
+kubectl wait --for=condition=ready pod -l app=grafana -n observability --timeout=300s
+
+echo -e "${GREEN}✓ Hub components ready${NC}"
+
+# Deploy edge node components
+echo -e "\n${YELLOW}⚡ Deploying edge node components...${NC}"
+kubectl apply -f k8s/edge-node/
+
+echo -e "${YELLOW}⏳ Waiting for edge components to be ready...${NC}"
+kubectl wait --for=condition=ready pod -l app=otel-collector -n observability --timeout=180s
+kubectl wait --for=condition=ready pod -l app=edge-demo-app -n observability --timeout=180s
+
+echo -e "${GREEN}✓ Edge components ready${NC}"
+
+# Display cluster information
+echo -e "\n${GREEN}✅ Setup Complete!${NC}"
+echo "=========================================="
+echo -e "\n${YELLOW}📊 Access URLs:${NC}"
+echo "  - Grafana:     http://localhost:30300"
+echo "    Username: admin"
+echo "    Password: admin"
+echo ""
+echo "  - Jaeger:      http://localhost:30686"
+echo ""
+echo "  To access Prometheus (port-forward required):"
+echo "    kubectl port-forward -n observability svc/prometheus 9090:9090"
+echo "    Then open: http://localhost:9090"
+echo ""
+
+echo -e "\n${YELLOW}🔍 Cluster Status:${NC}"
+kubectl get nodes -o wide
+echo ""
+kubectl get pods -n observability -o wide
+
+echo -e "\n${YELLOW}📝 Next Steps:${NC}"
+echo "  1. Run load tests: ./scripts/load-generator.sh"
+echo "  2. Open Grafana and explore dashboards"
+echo "  3. Simulate network failure: ./scripts/simulate-network-failure.sh"
+echo "  4. Restore network: ./scripts/restore-network.sh"
+echo ""

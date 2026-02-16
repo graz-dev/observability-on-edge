@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edge-demo-app
+  namespace: observability
+  labels:
+    app: edge-demo-app
+    component: application
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: edge-demo-app
+  template:
+    metadata:
+      labels:
+        app: edge-demo-app
+        component: application
+    spec:
+      nodeSelector:
+        node-role: edge
+      containers:
+      - name: app
+        image: edge-demo-app:latest
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "otel-collector.observability.svc.cluster.local:4317"
+        - name: OTEL_SERVICE_NAME
+          value: "edge-demo-app"
+        - name: OTEL_RESOURCE_ATTRIBUTES
+          value: "deployment.environment=edge,service.version=1.0.0"
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        volumeMounts:
+        - name: logs
+          mountPath: /var/log/app
+      volumes:
+      - name: logs
+        emptyDir: {}

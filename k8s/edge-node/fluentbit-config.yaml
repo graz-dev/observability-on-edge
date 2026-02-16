@@ -1,0 +1,118 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fluent-bit-config
+  namespace: observability
+  labels:
+    app: fluent-bit
+data:
+  fluent-bit.conf: |
+    [SERVICE]
+        Flush         5
+        Daemon        off
+        Log_Level     info
+        Parsers_File  parsers.conf
+        HTTP_Server   On
+        HTTP_Listen   0.0.0.0
+        HTTP_Port     2020
+        storage.path              /tmp/fluentbit-storage
+        storage.sync              normal
+        storage.checksum          off
+        storage.max_chunks_up     128
+        storage.backlog.mem_limit 5M
+
+    [INPUT]
+        Name              tail
+        Tag               kube.*
+        Path              /var/log/pods/observability_edge-demo-app*/*/*.log
+        Parser            cri
+        DB                /tmp/fluentbit-storage/tail.db
+        Mem_Buf_Limit     5MB
+        Skip_Long_Lines   On
+        Refresh_Interval  10
+        storage.type      filesystem
+
+    [FILTER]
+        Name                kubernetes
+        Match               kube.*
+        Kube_URL            https://kubernetes.default.svc:443
+        Kube_CA_File        /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        Kube_Token_File     /var/run/secrets/kubernetes.io/serviceaccount/token
+        Kube_Tag_Prefix     kube.var.log.pods.
+        Regex_Parser        kube-tag
+        Merge_Log           On
+        Keep_Log            Off
+        K8S-Logging.Parser  On
+        K8S-Logging.Exclude On
+        Labels              On
+        Annotations         Off
+
+    [FILTER]
+        Name modify
+        Match kube.*
+        Add cluster edge-observability
+
+    [FILTER]
+        Name    lua
+        Match   kube.*
+        script  /fluent-bit/etc/filter_logs.lua
+        call    filter_by_severity_or_latency
+
+    [OUTPUT]
+        Name                     opentelemetry
+        Match                    kube.*
+        Host                     otel-collector.observability.svc.cluster.local
+        Port                     4318
+        logs_uri                 /v1/logs
+        tls                      off
+        tls.verify               off
+        storage.total_limit_size 50M
+
+  parsers.conf: |
+    [PARSER]
+        Name   json
+        Format json
+        Time_Key timestamp
+        Time_Format %Y-%m-%dT%H:%M:%S.%LZ
+        Time_Keep On
+
+    [PARSER]
+        Name        docker
+        Format      json
+        Time_Key    time
+        Time_Format %Y-%m-%dT%H:%M:%S.%LZ
+        Time_Keep   On
+
+    [PARSER]
+        Name        cri
+        Format      regex
+        Regex       ^(?<time>[^ ]+) (?<stream>stdout|stderr) (?<logtag>[^ ]*) (?<log>.*)$
+        Time_Key    time
+        Time_Format %Y-%m-%dT%H:%M:%S.%L%z
+        Time_Keep   On
+
+    [PARSER]
+        Name        kube-tag
+        Format      regex
+        Regex       ^(?<namespace_name>[^_]+)_(?<pod_name>[^_]+)_(?<pod_id>[^\.]+)\.(?<container_name>[^\.]+)\.(?<container_num>\d+)\.log$
+
+  filter_logs.lua: |
+    function filter_by_severity_or_latency(tag, timestamp, record)
+        -- After Merge_Log On, JSON fields are merged directly into record
+        -- Get level and duration_ms from record (not from nested log field)
+        local level = record["level"]
+        local duration_ms = record["duration_ms"]
+
+        -- Keep error logs (regardless of duration)
+        if level == "error" then
+            return 0, 0, 0  -- Keep
+        end
+
+        -- Keep slow requests (>= 200ms, regardless of level)
+        if duration_ms ~= nil and tonumber(duration_ms) >= 200 then
+            return 0, 0, 0  -- Keep
+        end
+
+        -- Drop everything else (warn, info, non-request logs, fast requests)
+        return -1, 0, 0  -- Drop
+    end
