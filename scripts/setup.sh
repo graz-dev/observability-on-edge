@@ -72,6 +72,34 @@ echo -e "\n${YELLOW}📁 Creating namespace...${NC}"
 kubectl apply -f k8s/namespace.yaml
 echo -e "${GREEN}✓ Namespace created${NC}"
 
+# Install k6 Operator
+echo -e "\n${YELLOW}📦 Installing k6 Operator...${NC}"
+kubectl apply --server-side \
+  -f https://raw.githubusercontent.com/grafana/k6-operator/main/bundle.yaml
+echo -e "${GREEN}✓ k6 Operator deployed${NC}"
+
+# Pre-import k6 runner image so the TestRun pod starts without pulling from internet.
+# grafana/k6 is a multi-arch manifest — k3d's containerd cannot import multi-arch manifests
+# directly. Pull the platform-specific image first so Docker resolves to a single digest.
+echo -e "\n${YELLOW}📦 Importing k6 runner image into cluster...${NC}"
+ARCH=$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/')
+docker pull --platform "linux/${ARCH}" grafana/k6:latest 2>&1 | tail -1
+if k3d image import grafana/k6:latest -c edge-observability 2>/dev/null; then
+  echo -e "${GREEN}✓ k6 runner image pre-loaded into cluster${NC}"
+else
+  echo -e "${YELLOW}⚠  k6 image import skipped (containerd digest issue) — runner pod will pull from Docker Hub${NC}"
+fi
+
+# Wait for k6 Operator controller to be ready
+echo -e "\n${YELLOW}⏳ Waiting for k6 Operator controller...${NC}"
+kubectl wait --for=condition=available deployment/k6-operator-controller-manager \
+  -n k6-operator-system --timeout=120s
+echo -e "${GREEN}✓ k6 Operator ready${NC}"
+
+# Apply k6 script ConfigMap (TestRun is created separately via load-generator.sh)
+kubectl apply -f k8s/load-test/k6-script-configmap.yaml
+echo -e "${GREEN}✓ k6 script ConfigMap applied${NC}"
+
 # Deploy hub node components first (backends)
 echo -e "\n${YELLOW}🎯 Deploying hub node components (backends)...${NC}"
 kubectl apply -f k8s/hub-node/
@@ -115,8 +143,9 @@ echo ""
 kubectl get pods -n observability -o wide
 
 echo -e "\n${YELLOW}📝 Next Steps:${NC}"
-echo "  1. Run load tests: ./scripts/load-generator.sh"
-echo "  2. Open Grafana and explore dashboards"
-echo "  3. Simulate network failure: ./scripts/simulate-network-failure.sh"
-echo "  4. Restore network: ./scripts/restore-network.sh"
+echo "  1. Start load test (k6 Operator):  ./scripts/load-generator.sh"
+echo "  2. Run the orchestrated demo:       ./scripts/demo.sh"
+echo "     (or manually: simulate → restore)"
+echo "  3. Simulate network failure:        ./scripts/simulate-network-failure.sh"
+echo "  4. Restore network:                 ./scripts/restore-network.sh"
 echo ""

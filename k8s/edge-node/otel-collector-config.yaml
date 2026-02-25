@@ -24,24 +24,16 @@ data:
           http:
             endpoint: 0.0.0.0:4318
 
-      prometheus:
-        config:
-          scrape_configs:
-            - job_name: 'otel-collector'
-              scrape_interval: 10s
-              static_configs:
-                - targets: ['localhost:8888']
-
     processors:
       memory_limiter:
         check_interval: 1s
-        limit_mib: 512
-        spike_limit_mib: 128
+        limit_mib: 400
+        spike_limit_mib: 80
 
       batch:
-        timeout: 10s
-        send_batch_size: 1024
-        send_batch_max_size: 2048
+        timeout: 5s
+        send_batch_size: 512
+        send_batch_max_size: 1024
 
       resource:
         attributes:
@@ -52,17 +44,25 @@ data:
             value: edge-observability
             action: insert
 
+      # Tail-based sampling: waits for the COMPLETE trace before deciding.
+      # IMPORTANT ORDER: must come BEFORE batch in the pipeline.
+      # Only two deterministic policies so that every sampled trace has
+      # a corresponding log entry (Fluent Bit uses the same criteria).
       tail_sampling:
-        decision_wait: 10s
-        num_traces: 100000
-        expected_new_traces_per_sec: 100
+        decision_wait: 5s
+        num_traces: 10000
+        expected_new_traces_per_sec: 10
         policies:
+          # Policy 1: keep ALL error traces (status_code=ERROR → 500 HTTP)
           - name: error-policy
             type: status_code
             status_code:
               status_codes:
                 - ERROR
 
+          # Policy 2: keep ALL slow traces (>200ms)
+          # This matches the Fluent Bit Lua filter exactly, guaranteeing
+          # that every sampled trace has a log and every kept log has a trace.
           - name: latency-policy
             type: latency
             latency:
@@ -75,7 +75,7 @@ data:
           insecure: true
         sending_queue:
           enabled: true
-          num_consumers: 10
+          num_consumers: 4
           queue_size: 1000
           storage: file_storage
         retry_on_failure:
@@ -84,12 +84,25 @@ data:
           max_interval: 30s
           max_elapsed_time: 300s
 
+      # Prometheus remote-write with file-backed persistent queue.
+      # We use prometheusremotewrite (not otlphttp/prometheus) because:
+      # - The Prometheus OTLP endpoint returns HTTP 400 for out-of-order samples
+      #   even with --enable-feature=out-of-order-ingestion (known limitation in
+      #   Prometheus v2.49 arm64 builds: no --storage.tsdb.out-of-order-time-window
+      #   CLI flag available). The remote-write endpoint /api/v1/write silently
+      #   skips out-of-order samples and returns 204, so the queue drains cleanly.
+      # Note: prometheusremotewrite does NOT support sending_queue.storage (file
+      # storage), so metric queuing is in-memory only. Metrics resume after restore
+      # but the failure-window gap is NOT back-filled. Traces and logs DO back-fill.
       prometheusremotewrite:
         endpoint: http://prometheus.observability.svc.cluster.local:9090/api/v1/write
         tls:
           insecure: true
-        # Note: prometheusremotewrite exporter doesn't support file-backed persistent queues
-        # Metrics will use in-memory queuing only
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 30s
+          max_elapsed_time: 300s
 
       loki:
         endpoint: http://loki.observability.svc.cluster.local:3100/loki/api/v1/push
@@ -97,7 +110,7 @@ data:
           insecure: true
         sending_queue:
           enabled: true
-          num_consumers: 10
+          num_consumers: 4
           queue_size: 1000
           storage: file_storage
         retry_on_failure:
@@ -106,22 +119,17 @@ data:
           max_interval: 30s
           max_elapsed_time: 300s
 
-      logging:
-        loglevel: info
-        sampling_initial: 5
-        sampling_thereafter: 200
-
     service:
       extensions: [health_check, pprof, file_storage]
 
       pipelines:
         traces:
           receivers: [otlp]
-          processors: [memory_limiter, resource, batch, tail_sampling]
+          processors: [memory_limiter, resource, tail_sampling, batch]
           exporters: [otlp/jaeger]
 
         metrics:
-          receivers: [otlp, prometheus]
+          receivers: [otlp]
           processors: [memory_limiter, resource, batch]
           exporters: [prometheusremotewrite]
 

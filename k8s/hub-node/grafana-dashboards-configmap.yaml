@@ -6,73 +6,36 @@ metadata:
   labels:
     grafana_dashboard: "1"
 data:
-  app-observability.json: |
+  # Dashboard 1: What is the vessel system doing?
+  # Used in Act 1 of the demo to show observability data flowing in.
+  vessel-operations.json: |
     {
-      "annotations": {
-        "list": []
-      },
+      "annotations": {"list": []},
       "editable": true,
-      "fiscalYearStartMonth": 0,
       "graphTooltip": 1,
       "id": null,
       "links": [],
-      "liveNow": false,
       "panels": [
         {
           "datasource": "Prometheus",
           "fieldConfig": {
             "defaults": {
-              "color": {
-                "mode": "thresholds"
-              },
-              "mappings": [],
+              "color": {"mode": "thresholds"},
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  },
-                  {
-                    "color": "yellow",
-                    "value": 5
-                  },
-                  {
-                    "color": "red",
-                    "value": 10
-                  }
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 5},
+                  {"color": "red", "value": 10}
                 ]
               },
               "unit": "reqps"
             }
           },
-          "gridPos": {
-            "h": 5,
-            "w": 6,
-            "x": 0,
-            "y": 0
-          },
+          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
           "id": 1,
-          "options": {
-            "colorMode": "value",
-            "graphMode": "area",
-            "justifyMode": "auto",
-            "orientation": "auto",
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ],
-              "fields": "",
-              "values": false
-            },
-            "textMode": "value_and_name"
-          },
-          "targets": [
-            {
-              "expr": "sum(rate(http_server_request_count_total[1m]))",
-              "refId": "A"
-            }
-          ],
+          "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"]}},
+          "targets": [{"expr": "sum(rate(http_server_request_count_total[1m]))", "refId": "A"}],
           "title": "Request Rate",
           "type": "stat"
         },
@@ -80,57 +43,25 @@ data:
           "datasource": "Prometheus",
           "fieldConfig": {
             "defaults": {
-              "color": {
-                "mode": "thresholds"
-              },
-              "mappings": [],
+              "color": {"mode": "thresholds"},
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  },
-                  {
-                    "color": "yellow",
-                    "value": 0.05
-                  },
-                  {
-                    "color": "red",
-                    "value": 0.15
-                  }
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 0.05},
+                  {"color": "red", "value": 0.15}
                 ]
               },
               "unit": "percentunit"
             }
           },
-          "gridPos": {
-            "h": 5,
-            "w": 6,
-            "x": 6,
-            "y": 0
-          },
+          "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
           "id": 2,
-          "options": {
-            "colorMode": "value",
-            "graphMode": "area",
-            "justifyMode": "auto",
-            "orientation": "auto",
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ],
-              "fields": "",
-              "values": false
-            },
-            "textMode": "value_and_name"
-          },
-          "targets": [
-            {
-              "expr": "sum(rate(http_server_request_count_total{http_status_code=~\"5..\"}[1m])) / sum(rate(http_server_request_count_total[1m]))",
-              "refId": "A"
-            }
-          ],
+          "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"]}},
+          "targets": [{
+            "expr": "sum(rate(http_server_request_count_total{http_status_code=~\"5..\"}[1m])) / sum(rate(http_server_request_count_total[1m]))",
+            "refId": "A"
+          }],
           "title": "Error Rate",
           "type": "stat"
         },
@@ -138,57 +69,25 @@ data:
           "datasource": "Prometheus",
           "fieldConfig": {
             "defaults": {
-              "color": {
-                "mode": "thresholds"
-              },
-              "mappings": [],
+              "color": {"mode": "thresholds"},
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  },
-                  {
-                    "color": "yellow",
-                    "value": 200
-                  },
-                  {
-                    "color": "red",
-                    "value": 500
-                  }
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 200},
+                  {"color": "red", "value": 500}
                 ]
               },
               "unit": "ms"
             }
           },
-          "gridPos": {
-            "h": 5,
-            "w": 6,
-            "x": 12,
-            "y": 0
-          },
+          "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
           "id": 3,
-          "options": {
-            "colorMode": "value",
-            "graphMode": "area",
-            "justifyMode": "auto",
-            "orientation": "auto",
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ],
-              "fields": "",
-              "values": false
-            },
-            "textMode": "value_and_name"
-          },
-          "targets": [
-            {
-              "expr": "histogram_quantile(0.95, sum(rate(http_server_request_duration_milliseconds_bucket[1m])) by (le))",
-              "refId": "A"
-            }
-          ],
+          "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"]}},
+          "targets": [{
+            "expr": "histogram_quantile(0.95, sum(rate(http_server_request_duration_milliseconds_bucket[1m])) by (le))",
+            "refId": "A"
+          }],
           "title": "P95 Latency",
           "type": "stat"
         },
@@ -196,256 +95,117 @@ data:
           "datasource": "Prometheus",
           "fieldConfig": {
             "defaults": {
-              "color": {
-                "mode": "thresholds"
-              },
-              "mappings": [],
+              "color": {"mode": "thresholds"},
               "thresholds": {
                 "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  }
-                ]
+                "steps": [{"color": "blue", "value": null}]
               },
               "unit": "short"
             }
           },
-          "gridPos": {
-            "h": 5,
-            "w": 6,
-            "x": 18,
-            "y": 0
-          },
+          "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
           "id": 4,
-          "options": {
-            "colorMode": "value",
-            "graphMode": "area",
-            "justifyMode": "auto",
-            "orientation": "auto",
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ],
-              "fields": "",
-              "values": false
-            },
-            "textMode": "value_and_name"
-          },
-          "targets": [
-            {
-              "expr": "sum(increase(http_server_request_count_total[1m]))",
-              "refId": "A"
-            }
-          ],
-          "title": "Total Requests (1m)",
+          "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"]}},
+          "targets": [{
+            "expr": "sum(increase(vessel_diagnostics_count_total[5m]))",
+            "refId": "A"
+          }],
+          "title": "Diagnostics Run (5m)",
           "type": "stat"
         },
         {
           "datasource": "Prometheus",
           "fieldConfig": {
             "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
+              "color": {"mode": "palette-classic"},
               "custom": {
-                "axisCenteredZero": false,
-                "axisColorMode": "text",
-                "axisLabel": "",
-                "axisPlacement": "auto",
-                "barAlignment": 0,
                 "drawStyle": "line",
-                "fillOpacity": 20,
-                "gradientMode": "none",
-                "hideFrom": {
-                  "tooltip": false,
-                  "viz": false,
-                  "legend": false
-                },
-                "lineInterpolation": "smooth",
+                "fillOpacity": 15,
                 "lineWidth": 2,
-                "pointSize": 5,
-                "scaleDistribution": {
-                  "type": "linear"
-                },
-                "showPoints": "never",
-                "spanNulls": false,
-                "stacking": {
-                  "group": "A",
-                  "mode": "none"
-                },
-                "thresholdsStyle": {
-                  "mode": "off"
-                }
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  }
-                ]
+                "lineInterpolation": "smooth",
+                "showPoints": "never"
               },
               "unit": "reqps"
             }
           },
-          "gridPos": {
-            "h": 8,
-            "w": 12,
-            "x": 0,
-            "y": 5
-          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
           "id": 5,
           "options": {
-            "legend": {
-              "calcs": ["mean", "max"],
-              "displayMode": "table",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "desc"
-            }
+            "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
+            "tooltip": {"mode": "multi", "sort": "desc"}
           },
-          "targets": [
-            {
-              "expr": "sum(rate(http_server_request_count_total[1m])) by (http_route)",
-              "legendFormat": "{{http_route}}",
-              "refId": "A"
-            }
-          ],
-          "title": "Traffic by Endpoint",
+          "targets": [{
+            "expr": "sum(rate(http_server_request_count_total[1m])) by (http_route)",
+            "legendFormat": "{{http_route}}",
+            "refId": "A"
+          }],
+          "title": "Request Rate by Endpoint",
           "type": "timeseries"
         },
         {
           "datasource": "Prometheus",
           "fieldConfig": {
             "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
+              "color": {"mode": "palette-classic"},
               "custom": {
-                "axisCenteredZero": false,
-                "axisColorMode": "text",
-                "axisLabel": "",
-                "axisPlacement": "auto",
-                "barAlignment": 0,
                 "drawStyle": "line",
-                "fillOpacity": 20,
-                "gradientMode": "none",
-                "hideFrom": {
-                  "tooltip": false,
-                  "viz": false,
-                  "legend": false
-                },
-                "lineInterpolation": "smooth",
+                "fillOpacity": 15,
                 "lineWidth": 2,
-                "pointSize": 5,
-                "scaleDistribution": {
-                  "type": "linear"
-                },
-                "showPoints": "never",
-                "spanNulls": false,
-                "stacking": {
-                  "group": "A",
-                  "mode": "none"
-                },
-                "thresholdsStyle": {
-                  "mode": "line"
-                }
+                "lineInterpolation": "smooth",
+                "showPoints": "never"
               },
-              "mappings": [],
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  },
-                  {
-                    "color": "yellow",
-                    "value": 200
-                  },
-                  {
-                    "color": "red",
-                    "value": 500
-                  }
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 200},
+                  {"color": "red", "value": 500}
                 ]
               },
               "unit": "ms"
             }
           },
-          "gridPos": {
-            "h": 8,
-            "w": 12,
-            "x": 12,
-            "y": 5
-          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
           "id": 6,
           "options": {
-            "legend": {
-              "calcs": ["mean", "max"],
-              "displayMode": "table",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "desc"
-            }
+            "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
+            "tooltip": {"mode": "multi", "sort": "desc"}
           },
           "targets": [
             {
               "expr": "histogram_quantile(0.50, sum(rate(http_server_request_duration_milliseconds_bucket[1m])) by (le, http_route))",
-              "legendFormat": "{{http_route}} - P50",
+              "legendFormat": "{{http_route}} P50",
               "refId": "A"
             },
             {
               "expr": "histogram_quantile(0.95, sum(rate(http_server_request_duration_milliseconds_bucket[1m])) by (le, http_route))",
-              "legendFormat": "{{http_route}} - P95",
+              "legendFormat": "{{http_route}} P95",
               "refId": "B"
             }
           ],
-          "title": "Latency by Endpoint (P50/P95)",
+          "title": "Latency P50/P95 by Endpoint",
           "type": "timeseries"
         },
         {
           "datasource": "Loki",
-          "gridPos": {
-            "h": 10,
-            "w": 24,
-            "x": 0,
-            "y": 13
-          },
+          "gridPos": {"h": 10, "w": 24, "x": 0, "y": 12},
           "id": 7,
           "options": {
             "dedupStrategy": "none",
             "enableLogDetails": true,
-            "prettifyLogMessage": false,
-            "showCommonLabels": false,
-            "showLabels": false,
             "showTime": true,
             "sortOrder": "Descending",
-            "wrapLogMessage": true,
+            "wrapLogMessage": false,
             "dataLinks": [
               {
-                "field": "body_trace_id",
-                "title": "View in Jaeger",
+                "field": "trace_id",
+                "title": "View trace in Jaeger",
                 "url": "http://localhost:30686/trace/${__value.raw}"
               }
             ]
           },
-          "targets": [
-            {
-              "expr": "{exporter=\"OTLP\"} | json",
-              "refId": "A"
-            }
-          ],
-          "title": "Application Logs (click trace_id to view in Jaeger)",
+          "targets": [{"expr": "{exporter=\"OTLP\"} | json", "refId": "A"}],
+          "title": "Application Logs — click trace_id to open trace in Jaeger",
           "type": "logs"
         }
       ],
@@ -453,565 +213,199 @@ data:
       "schemaVersion": 38,
       "style": "dark",
       "tags": ["edge", "application"],
-      "templating": {
-        "list": []
-      },
-      "time": {
-        "from": "now-15m",
-        "to": "now"
-      },
-      "timepicker": {},
+      "time": {"from": "now-15m", "to": "now"},
       "timezone": "",
-      "title": "Application Observability",
-      "uid": "app-observability",
-      "version": 2
+      "title": "Vessel Operations",
+      "uid": "vessel-operations",
+      "version": 1
     }
-  monitoring-health.json: |
+
+  # Dashboard 2: Is the edge pipeline working correctly?
+  # Three sections: SAMPLING → RESILIENCE → COLLECTOR FOOTPRINT
+  # The resilience section is the centrepiece of the network-failure demo.
+  edge-pipeline.json: |
     {
-      "annotations": {
-        "list": []
-      },
+      "annotations": {"list": []},
       "editable": true,
-      "fiscalYearStartMonth": 0,
       "graphTooltip": 1,
       "id": null,
       "links": [],
-      "liveNow": false,
       "panels": [
+
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+          "id": 100,
+          "title": "SAMPLING — how much data we keep vs drop",
+          "type": "row"
+        },
+
         {
           "datasource": "Prometheus",
+          "description": "Percentage of spans dropped by tail-based sampling. Higher is better: it means we're sending less noise to the backend while keeping all errors and slow traces.",
           "fieldConfig": {
             "defaults": {
-              "color": {
-                "mode": "thresholds"
-              },
-              "mappings": [],
+              "color": {"mode": "thresholds"},
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  },
-                  {
-                    "color": "yellow",
-                    "value": 60
-                  },
-                  {
-                    "color": "red",
-                    "value": 80
-                  }
+                  {"color": "red", "value": null},
+                  {"color": "yellow", "value": 50},
+                  {"color": "green", "value": 70}
                 ]
               },
-              "unit": "percent"
+              "unit": "percent",
+              "min": 0,
+              "max": 100
             }
           },
-          "gridPos": {
-            "h": 6,
-            "w": 8,
-            "x": 0,
-            "y": 0
-          },
-          "id": 1,
+          "gridPos": {"h": 7, "w": 5, "x": 0, "y": 1},
+          "id": 10,
           "options": {
             "orientation": "auto",
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ],
-              "fields": "",
-              "values": false
-            },
+            "reduceOptions": {"calcs": ["lastNotNull"]},
             "showThresholdLabels": false,
             "showThresholdMarkers": true
           },
-          "targets": [
-            {
-              "expr": "(1 - (sum(rate(otelcol_exporter_sent_spans[5m])) / sum(rate(otelcol_receiver_accepted_spans[5m])))) * 100",
-              "refId": "A"
-            }
-          ],
-          "title": "Data Reduction",
+          "targets": [{
+            "expr": "(1 - sum(rate(otelcol_exporter_sent_spans[2m])) / sum(rate(otelcol_receiver_accepted_spans[2m]))) * 100",
+            "refId": "A",
+            "legendFormat": "Traces dropped %"
+          }],
+          "title": "Trace Data Reduction",
           "type": "gauge"
         },
+
         {
           "datasource": "Prometheus",
+          "description": "Spans received by the collector vs spans actually exported. The gap is what tail-based sampling drops (fast, successful requests).",
           "fieldConfig": {
             "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
+              "color": {"mode": "palette-classic"},
               "custom": {
-                "axisCenteredZero": false,
-                "axisColorMode": "text",
-                "axisLabel": "items/sec",
-                "axisPlacement": "auto",
-                "barAlignment": 0,
                 "drawStyle": "line",
                 "fillOpacity": 20,
-                "gradientMode": "none",
-                "hideFrom": {
-                  "tooltip": false,
-                  "viz": false,
-                  "legend": false
-                },
-                "lineInterpolation": "smooth",
                 "lineWidth": 2,
-                "pointSize": 5,
-                "scaleDistribution": {
-                  "type": "linear"
-                },
-                "showPoints": "never",
-                "spanNulls": false,
-                "stacking": {
-                  "group": "A",
-                  "mode": "none"
-                },
-                "thresholdsStyle": {
-                  "mode": "off"
-                }
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  },
-                  {
-                    "color": "yellow",
-                    "value": 5
-                  },
-                  {
-                    "color": "red",
-                    "value": 10
-                  }
-                ]
+                "lineInterpolation": "smooth",
+                "showPoints": "never"
               },
               "unit": "short"
             },
             "overrides": [
               {
-                "matcher": {
-                  "id": "byName",
-                  "options": "Traces Queuing"
-                },
-                "properties": [
-                  {
-                    "id": "color",
-                    "value": {
-                      "fixedColor": "blue",
-                      "mode": "fixed"
-                    }
-                  }
-                ]
+                "matcher": {"id": "byName", "options": "Received from app"},
+                "properties": [{"id": "color", "value": {"fixedColor": "blue", "mode": "fixed"}}]
               },
               {
-                "matcher": {
-                  "id": "byName",
-                  "options": "Logs Queuing"
-                },
-                "properties": [
-                  {
-                    "id": "color",
-                    "value": {
-                      "fixedColor": "green",
-                      "mode": "fixed"
-                    }
-                  }
-                ]
-              },
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "Metrics Queuing"
-                },
-                "properties": [
-                  {
-                    "id": "color",
-                    "value": {
-                      "fixedColor": "purple",
-                      "mode": "fixed"
-                    }
-                  }
-                ]
+                "matcher": {"id": "byName", "options": "Exported (sampled)"},
+                "properties": [{"id": "color", "value": {"fixedColor": "green", "mode": "fixed"}}]
               }
             ]
           },
-          "gridPos": {
-            "h": 6,
-            "w": 16,
-            "x": 8,
-            "y": 0
-          },
-          "id": 2,
+          "gridPos": {"h": 7, "w": 19, "x": 5, "y": 1},
+          "id": 11,
           "options": {
-            "legend": {
-              "calcs": ["mean", "max"],
-              "displayMode": "table",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "desc"
-            }
-          },
-          "targets": [
-            {
-              "expr": "sum(rate(otelcol_receiver_accepted_spans[1m])) - sum(rate(otelcol_exporter_sent_spans[1m]))",
-              "legendFormat": "Traces Queuing",
-              "refId": "A"
-            },
-            {
-              "expr": "sum(rate(otelcol_receiver_accepted_log_records[1m])) - sum(rate(otelcol_exporter_sent_log_records[1m]))",
-              "legendFormat": "Logs Queuing",
-              "refId": "B"
-            },
-            {
-              "expr": "sum(rate(otelcol_receiver_accepted_metric_points[1m])) - sum(rate(otelcol_exporter_sent_metric_points[1m]))",
-              "legendFormat": "Metrics Queuing",
-              "refId": "C"
-            }
-          ],
-          "title": "Fallback Queue Storage (Items/sec)",
-          "description": "Shows data being received but NOT exported (queued in fallback storage). During satellite link loss, these lines spike as data accumulates locally. When connectivity returns, lines drop to zero as queue drains.",
-          "type": "timeseries"
-        },
-        {
-          "datasource": "Prometheus",
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
-              "custom": {
-                "axisCenteredZero": false,
-                "axisColorMode": "text",
-                "axisLabel": "spans/sec",
-                "axisPlacement": "auto",
-                "barAlignment": 0,
-                "drawStyle": "line",
-                "fillOpacity": 30,
-                "gradientMode": "opacity",
-                "hideFrom": {
-                  "tooltip": false,
-                  "viz": false,
-                  "legend": false
-                },
-                "lineInterpolation": "smooth",
-                "lineWidth": 2,
-                "pointSize": 5,
-                "scaleDistribution": {
-                  "type": "linear"
-                },
-                "showPoints": "never",
-                "spanNulls": false,
-                "stacking": {
-                  "group": "A",
-                  "mode": "none"
-                },
-                "thresholdsStyle": {
-                  "mode": "off"
-                }
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  }
-                ]
-              },
-              "unit": "short"
-            },
-            "overrides": [
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "Received"
-                },
-                "properties": [
-                  {
-                    "id": "color",
-                    "value": {
-                      "fixedColor": "blue",
-                      "mode": "fixed"
-                    }
-                  }
-                ]
-              },
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "Exported (Sampled)"
-                },
-                "properties": [
-                  {
-                    "id": "color",
-                    "value": {
-                      "fixedColor": "green",
-                      "mode": "fixed"
-                    }
-                  }
-                ]
-              }
-            ]
-          },
-          "gridPos": {
-            "h": 9,
-            "w": 12,
-            "x": 0,
-            "y": 6
-          },
-          "id": 4,
-          "options": {
-            "legend": {
-              "calcs": ["mean", "max"],
-              "displayMode": "table",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "desc"
-            }
+            "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
+            "tooltip": {"mode": "multi", "sort": "desc"}
           },
           "targets": [
             {
               "expr": "sum(rate(otelcol_receiver_accepted_spans[1m]))",
-              "legendFormat": "Received",
+              "legendFormat": "Received from app",
               "refId": "A"
             },
             {
               "expr": "sum(rate(otelcol_exporter_sent_spans[1m]))",
-              "legendFormat": "Exported (Sampled)",
+              "legendFormat": "Exported (sampled)",
               "refId": "B"
             }
           ],
-          "title": "Trace Data Flow (Sampling in Action)",
+          "title": "Trace Flow: Received vs Exported",
           "type": "timeseries"
         },
+
         {
           "datasource": "Prometheus",
+          "description": "Log records entering Fluent Bit vs records forwarded to the OTel Collector. The gap is what the Lua filter drops (fast, non-error requests). Fluent Bit filters at the very source, before data ever reaches the collector.",
           "fieldConfig": {
             "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
+              "color": {"mode": "palette-classic"},
               "custom": {
-                "axisCenteredZero": false,
-                "axisColorMode": "text",
-                "axisLabel": "logs/sec",
-                "axisPlacement": "auto",
-                "barAlignment": 0,
                 "drawStyle": "line",
-                "fillOpacity": 30,
-                "gradientMode": "opacity",
-                "hideFrom": {
-                  "tooltip": false,
-                  "viz": false,
-                  "legend": false
-                },
-                "lineInterpolation": "smooth",
+                "fillOpacity": 20,
                 "lineWidth": 2,
-                "pointSize": 5,
-                "scaleDistribution": {
-                  "type": "linear"
-                },
-                "showPoints": "never",
-                "spanNulls": false,
-                "stacking": {
-                  "group": "A",
-                  "mode": "none"
-                },
-                "thresholdsStyle": {
-                  "mode": "off"
-                }
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  }
-                ]
+                "lineInterpolation": "smooth",
+                "showPoints": "never"
               },
               "unit": "short"
             },
             "overrides": [
               {
-                "matcher": {
-                  "id": "byName",
-                  "options": "Received"
-                },
-                "properties": [
-                  {
-                    "id": "color",
-                    "value": {
-                      "fixedColor": "blue",
-                      "mode": "fixed"
-                    }
-                  }
-                ]
+                "matcher": {"id": "byName", "options": "Generated (all logs)"},
+                "properties": [{"id": "color", "value": {"fixedColor": "blue", "mode": "fixed"}}]
               },
               {
-                "matcher": {
-                  "id": "byName",
-                  "options": "Exported (Filtered)"
-                },
-                "properties": [
-                  {
-                    "id": "color",
-                    "value": {
-                      "fixedColor": "green",
-                      "mode": "fixed"
-                    }
-                  }
-                ]
+                "matcher": {"id": "byName", "options": "Forwarded (errors + slow)"},
+                "properties": [{"id": "color", "value": {"fixedColor": "green", "mode": "fixed"}}]
               }
             ]
           },
-          "gridPos": {
-            "h": 9,
-            "w": 12,
-            "x": 12,
-            "y": 6
-          },
-          "id": 5,
+          "gridPos": {"h": 7, "w": 12, "x": 0, "y": 8},
+          "id": 12,
           "options": {
-            "legend": {
-              "calcs": ["mean", "max"],
-              "displayMode": "table",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "desc"
-            }
+            "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
+            "tooltip": {"mode": "multi", "sort": "desc"}
           },
           "targets": [
             {
-              "expr": "sum(rate(otelcol_receiver_accepted_log_records[1m]))",
-              "legendFormat": "Received",
+              "expr": "sum(rate(fluentbit_input_records_total[1m]))",
+              "legendFormat": "Generated (all logs)",
               "refId": "A"
             },
             {
-              "expr": "sum(rate(otelcol_exporter_sent_log_records[1m]))",
-              "legendFormat": "Exported (Filtered)",
+              "expr": "sum(rate(fluentbit_output_proc_records_total[1m]))",
+              "legendFormat": "Forwarded (errors + slow)",
               "refId": "B"
             }
           ],
-          "title": "Log Data Flow (Filtering in Action)",
-          "description": "Shows log filtering effect. Only error logs and logs from slow requests (≥200ms) are exported. Fast successful requests are dropped by Fluent Bit filter.",
+          "title": "Log Flow: Fluent Bit Input vs Forwarded",
           "type": "timeseries"
         },
+
         {
           "datasource": "Prometheus",
+          "description": "Which sampling policy is keeping traces? Errors (100%), Slow >200ms (100%), Probabilistic (10% of the rest).",
           "fieldConfig": {
             "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
+              "color": {"mode": "palette-classic"},
               "custom": {
-                "axisCenteredZero": false,
-                "axisColorMode": "text",
-                "axisLabel": "",
-                "axisPlacement": "auto",
-                "barAlignment": 0,
                 "drawStyle": "bars",
                 "fillOpacity": 70,
-                "gradientMode": "none",
-                "hideFrom": {
-                  "tooltip": false,
-                  "viz": false,
-                  "legend": false
-                },
-                "lineInterpolation": "linear",
                 "lineWidth": 1,
-                "pointSize": 5,
-                "scaleDistribution": {
-                  "type": "linear"
-                },
-                "showPoints": "never",
-                "spanNulls": false,
-                "stacking": {
-                  "group": "A",
-                  "mode": "normal"
-                },
-                "thresholdsStyle": {
-                  "mode": "off"
-                }
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  }
-                ]
+                "stacking": {"mode": "normal", "group": "A"}
               },
               "unit": "short"
             },
             "overrides": [
               {
-                "matcher": {
-                  "id": "byRegexp",
-                  "options": ".*sampled.*"
-                },
-                "properties": [
-                  {
-                    "id": "color",
-                    "value": {
-                      "fixedColor": "green",
-                      "mode": "fixed"
-                    }
-                  }
-                ]
+                "matcher": {"id": "byName", "options": "Errors (kept)"},
+                "properties": [{"id": "color", "value": {"fixedColor": "red", "mode": "fixed"}}]
               },
               {
-                "matcher": {
-                  "id": "byRegexp",
-                  "options": ".*not.*"
-                },
-                "properties": [
-                  {
-                    "id": "color",
-                    "value": {
-                      "fixedColor": "orange",
-                      "mode": "fixed"
-                    }
-                  }
-                ]
+                "matcher": {"id": "byName", "options": "Slow >200ms (kept)"},
+                "properties": [{"id": "color", "value": {"fixedColor": "orange", "mode": "fixed"}}]
+              },
+              {
+                "matcher": {"id": "byName", "options": "Probabilistic 10% (kept)"},
+                "properties": [{"id": "color", "value": {"fixedColor": "green", "mode": "fixed"}}]
               }
             ]
           },
-          "gridPos": {
-            "h": 8,
-            "w": 12,
-            "x": 0,
-            "y": 15
-          },
-          "id": 6,
+          "gridPos": {"h": 7, "w": 12, "x": 12, "y": 8},
+          "id": 13,
           "options": {
-            "legend": {
-              "calcs": ["sum"],
-              "displayMode": "table",
-              "placement": "right",
-              "showLegend": true
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "desc"
-            }
+            "legend": {"calcs": ["sum"], "displayMode": "table", "placement": "right"},
+            "tooltip": {"mode": "multi", "sort": "desc"}
           },
           "targets": [
             {
@@ -1025,150 +419,206 @@ data:
               "refId": "B"
             },
             {
-              "expr": "sum(rate(otelcol_processor_tail_sampling_global_count_traces_sampled{sampled=\"false\"}[1m])) or vector(0)",
-              "legendFormat": "Dropped",
+              "expr": "sum(rate(otelcol_processor_tail_sampling_count_traces_sampled{policy=\"probabilistic-policy\",sampled=\"true\"}[1m])) or vector(0)",
+              "legendFormat": "Probabilistic 10% (kept)",
               "refId": "C"
             }
           ],
           "title": "Sampling Policy Breakdown",
           "type": "timeseries"
         },
+
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 15},
+          "id": 200,
+          "title": "RESILIENCE — what happens when the satellite link goes down",
+          "type": "row"
+        },
+
         {
           "datasource": "Prometheus",
+          "description": "Export throughput for traces and logs. Drops to zero when the satellite link is down (data queues on disk). Spikes above baseline after restore — that spike IS the queue draining: all accumulated spans and log records flushed at once. Trace and log backends (Jaeger, Loki) accept out-of-order data so the failure-window gap fills in with original timestamps.",
           "fieldConfig": {
             "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
+              "color": {"mode": "palette-classic"},
               "custom": {
-                "axisCenteredZero": false,
-                "axisColorMode": "text",
-                "axisLabel": "",
-                "axisPlacement": "auto",
-                "barAlignment": 0,
                 "drawStyle": "line",
                 "fillOpacity": 20,
-                "gradientMode": "none",
-                "hideFrom": {
-                  "tooltip": false,
-                  "viz": false,
-                  "legend": false
-                },
-                "lineInterpolation": "smooth",
                 "lineWidth": 2,
-                "pointSize": 5,
-                "scaleDistribution": {
-                  "type": "linear"
-                },
-                "showPoints": "never",
-                "spanNulls": false,
-                "stacking": {
-                  "group": "A",
-                  "mode": "none"
-                },
-                "thresholdsStyle": {
-                  "mode": "off"
-                }
+                "lineInterpolation": "smooth",
+                "showPoints": "never"
               },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  }
-                ]
-              },
-              "unit": "short"
+              "unit": "cps",
+              "min": 0
             },
             "overrides": [
               {
-                "matcher": {
-                  "id": "byRegexp",
-                  "options": ".*CPU.*"
-                },
-                "properties": [
-                  {
-                    "id": "unit",
-                    "value": "percent"
-                  }
-                ]
+                "matcher": {"id": "byName", "options": "Traces exported (spans/s)"},
+                "properties": [{"id": "color", "value": {"fixedColor": "blue", "mode": "fixed"}}]
               },
               {
-                "matcher": {
-                  "id": "byRegexp",
-                  "options": ".*Memory.*"
-                },
+                "matcher": {"id": "byName", "options": "Logs exported (records/s)"},
+                "properties": [{"id": "color", "value": {"fixedColor": "green", "mode": "fixed"}}]
+              }
+            ]
+          },
+          "gridPos": {"h": 8, "w": 16, "x": 0, "y": 16},
+          "id": 20,
+          "options": {
+            "legend": {"calcs": ["max", "mean"], "displayMode": "table", "placement": "bottom"},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "expr": "rate(otelcol_exporter_sent_spans{exporter=\"otlp/jaeger\"}[30s])",
+              "legendFormat": "Traces exported (spans/s)",
+              "refId": "A"
+            },
+            {
+              "expr": "rate(otelcol_exporter_sent_log_records{exporter=\"loki\"}[30s])",
+              "legendFormat": "Logs exported (records/s)",
+              "refId": "B"
+            }
+          ],
+          "title": "Export Throughput — drops to 0 on outage, spikes on recovery (queue drain)",
+          "type": "timeseries"
+        },
+
+        {
+          "datasource": "Prometheus",
+          "description": "Permanent data drops in the last 5 minutes (items dropped after max_elapsed_time=5min or queue overflow). Zero is correct for short outages — the file-backed queue absorbs all data without dropping. Only increments if the outage exceeds 5 minutes or the queue fills up (queue_size=1000 batches).",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 1},
+                  {"color": "red", "value": 10}
+                ]
+              },
+              "unit": "short"
+            }
+          },
+          "gridPos": {"h": 4, "w": 8, "x": 16, "y": 16},
+          "id": 21,
+          "options": {"colorMode": "background", "graphMode": "none", "reduceOptions": {"calcs": ["lastNotNull"]}},
+          "targets": [{
+            "expr": "sum(increase(otelcol_exporter_send_failed_spans[5m])) + sum(increase(otelcol_exporter_send_failed_log_records[5m]))",
+            "refId": "A",
+            "legendFormat": "Permanent drops (5m)"
+          }],
+          "title": "Permanent Data Drops (5m) — 0 = queue working",
+          "type": "stat"
+        },
+
+        {
+          "datasource": "Prometheus",
+          "description": "Total batches in the file-backed persistent queue across all exporters (traces → Jaeger, logs → Loki). Rises during a network outage as data accumulates on disk; drops back to 0 after link restore when the backlog drains. Each unit = one batch (up to 512 items). In OTel v0.95, queue_size is emitted by whichever exporter last had activity — sum() captures both. Note: bbolt files on disk do not shrink after drain (high-water mark behaviour); this metric is the authoritative real-time queue depth.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "fixed", "fixedColor": "yellow"},
+              "custom": {
+                "fillOpacity": 20,
+                "lineWidth": 2,
+                "spanNulls": false,
+                "thresholdsStyle": {"mode": "line"},
+                "drawStyle": "line"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "red", "value": 1}
+                ]
+              },
+              "unit": "short",
+              "min": 0
+            }
+          },
+          "gridPos": {"h": 6, "w": 8, "x": 16, "y": 20},
+          "id": 22,
+          "options": {
+            "tooltip": {"mode": "single"},
+            "legend": {"displayMode": "list", "placement": "bottom"}
+          },
+          "targets": [{
+            "expr": "sum(otelcol_exporter_queue_size) or vector(0)",
+            "refId": "A",
+            "legendFormat": "Batches queued (logs + traces)"
+          }],
+          "title": "Queue Depth (batches) — rises during outage, 0 = drained",
+          "type": "timeseries"
+        },
+
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 24},
+          "id": 300,
+          "title": "COLLECTOR FOOTPRINT — resource usage on the edge node",
+          "type": "row"
+        },
+
+        {
+          "datasource": "Prometheus",
+          "description": "CPU and memory used by the OTel Collector process. These metrics come from the collector itself (otelcol_process_*). Keep this low: the collector must not compete with the application workload.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 15,
+                "lineWidth": 2,
+                "lineInterpolation": "smooth",
+                "showPoints": "never"
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {"id": "byRegexp", "options": ".*CPU.*"},
+                "properties": [{"id": "unit", "value": "percentunit"}]
+              },
+              {
+                "matcher": {"id": "byRegexp", "options": ".*Memory.*"},
                 "properties": [
-                  {
-                    "id": "unit",
-                    "value": "bytes"
-                  }
+                  {"id": "unit", "value": "bytes"},
+                  {"id": "custom.axisPlacement", "value": "right"}
                 ]
               }
             ]
           },
-          "gridPos": {
-            "h": 8,
-            "w": 12,
-            "x": 12,
-            "y": 15
-          },
-          "id": 7,
+          "gridPos": {"h": 7, "w": 24, "x": 0, "y": 25},
+          "id": 30,
           "options": {
-            "legend": {
-              "calcs": ["mean", "max"],
-              "displayMode": "table",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "desc"
-            }
+            "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
+            "tooltip": {"mode": "multi", "sort": "desc"}
           },
           "targets": [
             {
-              "expr": "rate(container_cpu_usage_seconds_total{namespace=\"observability\",pod=~\"otel-collector-.*\"}[1m]) * 100",
-              "legendFormat": "OTel CPU %",
+              "expr": "rate(otelcol_process_cpu_seconds_total[1m])",
+              "legendFormat": "OTel Collector CPU",
               "refId": "A"
             },
             {
-              "expr": "container_memory_working_set_bytes{namespace=\"observability\",pod=~\"otel-collector-.*\"}",
-              "legendFormat": "OTel Memory",
+              "expr": "otelcol_process_memory_rss",
+              "legendFormat": "OTel Collector Memory RSS",
               "refId": "B"
-            },
-            {
-              "expr": "rate(container_cpu_usage_seconds_total{namespace=\"observability\",pod=~\"fluent-bit-.*\"}[1m]) * 100",
-              "legendFormat": "Fluent Bit CPU %",
-              "refId": "C"
-            },
-            {
-              "expr": "container_memory_working_set_bytes{namespace=\"observability\",pod=~\"fluent-bit-.*\"}",
-              "legendFormat": "Fluent Bit Memory",
-              "refId": "D"
             }
           ],
-          "title": "Resource Usage: CPU & Memory",
-          "description": "Shows CPU and memory footprint of OTel Collector and Fluent Bit on the edge node. Monitor resource consumption during network failures and queue buildup.",
+          "title": "OTel Collector Resource Footprint",
           "type": "timeseries"
         }
+
       ],
       "refresh": "5s",
       "schemaVersion": 38,
       "style": "dark",
-      "tags": ["edge", "monitoring", "system"],
-      "templating": {
-        "list": []
-      },
-      "time": {
-        "from": "now-15m",
-        "to": "now"
-      },
-      "timepicker": {},
+      "tags": ["edge", "pipeline"],
+      "time": {"from": "now-15m", "to": "now"},
       "timezone": "",
-      "title": "Edge Observability System",
-      "uid": "monitoring-health",
-      "version": 2
+      "title": "Edge Pipeline",
+      "uid": "edge-pipeline",
+      "version": 1
     }

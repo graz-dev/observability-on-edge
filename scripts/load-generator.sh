@@ -1,61 +1,93 @@
 #!/bin/bash
 
-set -e
+set -euo pipefail
 
-# Colors for output
-RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+RED='\033[0;31m'
+NC='\033[0m'
 
-echo -e "${GREEN}⚓ Starting Maritime Vessel Monitoring Simulation${NC}"
-echo "=========================================="
+NAMESPACE="observability"
+TESTRUN_NAME="vessel-monitoring"
 
-# Check if k6 is installed
-if ! command -v k6 &> /dev/null; then
-    echo -e "${RED}❌ k6 is not installed${NC}"
-    echo ""
-    echo -e "${YELLOW}Install k6:${NC}"
-    echo "  macOS:   brew install k6"
-    echo "  Linux:   https://k6.io/docs/getting-started/installation/"
-    echo "  Windows: choco install k6"
-    echo ""
-    echo -e "${YELLOW}Alternative: Run load test in Docker${NC}"
-    echo '  docker run --rm -i --network=host grafana/k6 run - <load-tests/k6-script.js'
-    exit 1
+echo -e "${GREEN}⚓ Starting Maritime Vessel Monitoring Load Test${NC}"
+echo "=================================================="
+
+# Verify k6 Operator CRD is installed
+if ! kubectl get crd testruns.k6.io &>/dev/null; then
+  echo -e "${RED}❌ k6 Operator not installed (CRD 'testruns.k6.io' missing).${NC}"
+  echo "   Run ./scripts/setup.sh first."
+  exit 1
 fi
 
-# Port-forward to application (in background)
-echo -e "\n${YELLOW}🔌 Setting up port-forward to application...${NC}"
-kubectl port-forward -n observability svc/edge-demo-app 8080:8080 >/dev/null 2>&1 &
-PF_PID=$!
+# Delete existing TestRun if present (operator keeps finished runs around)
+if kubectl get testrun "${TESTRUN_NAME}" -n "${NAMESPACE}" &>/dev/null; then
+  echo -e "\n${YELLOW}⚠️  Existing TestRun '${TESTRUN_NAME}' found — deleting it...${NC}"
+  kubectl delete testrun "${TESTRUN_NAME}" -n "${NAMESPACE}"
+  # Wait for runner pods to terminate
+  echo -e "${YELLOW}⏳ Waiting for runner pods to terminate...${NC}"
+  kubectl wait --for=delete pod -l "k6_cr=${TESTRUN_NAME}" \
+    -n "${NAMESPACE}" --timeout=60s 2>/dev/null || true
+  sleep 2
+fi
 
-# Cleanup function
-cleanup() {
-    echo -e "\n${YELLOW}🧹 Cleaning up...${NC}"
-    kill $PF_PID 2>/dev/null || true
-}
-trap cleanup EXIT
+# Apply ConfigMap (script) and TestRun
+echo -e "\n${YELLOW}📦 Applying k6 ConfigMap and TestRun...${NC}"
+kubectl apply -f k8s/load-test/k6-script-configmap.yaml
+kubectl apply -f k8s/load-test/testrun.yaml
+echo -e "${GREEN}✓ TestRun '${TESTRUN_NAME}' created${NC}"
 
-# Wait for port-forward to be ready
-sleep 3
+# Wait for the TestRun to reach 'started' stage
+echo -e "\n${YELLOW}⏳ Waiting for k6 runner to start (up to 120s)...${NC}"
+echo "   (operator creates initializer job → runner pod → k6 starts)"
 
-echo -e "${GREEN}✓ Port-forward established${NC}"
+TIMEOUT=120
+START=$SECONDS
+while [[ $((SECONDS - START)) -lt $TIMEOUT ]]; do
+  STAGE=$(kubectl get testrun "${TESTRUN_NAME}" -n "${NAMESPACE}" \
+    -o jsonpath='{.status.stage}' 2>/dev/null || echo "pending")
 
-# Run k6 load test
-echo -e "\n${YELLOW}🚀 Simulating vessel sensor monitoring...${NC}"
-echo "  Duration: ~6 minutes"
-echo "  Patterns:"
-echo "    - Continuous engine & navigation sensor reads (fast)"
-echo "    - Periodic diagnostic analysis (slow)"
-echo "    - Occasional system alerts (error-prone)"
+  case "$STAGE" in
+    "started")
+      echo -e "${GREEN}✓ TestRun started${NC}"
+      break
+      ;;
+    "error")
+      echo -e "${RED}❌ TestRun entered error state${NC}"
+      kubectl describe testrun "${TESTRUN_NAME}" -n "${NAMESPACE}"
+      exit 1
+      ;;
+    "finished")
+      echo -e "${YELLOW}⚠️  TestRun finished immediately — check the script${NC}"
+      break
+      ;;
+  esac
+
+  printf "  Stage: %-20s (%ds elapsed)\r" "${STAGE}" "$((SECONDS - START))"
+  sleep 5
+done
+printf "\n"
+
+if [[ $((SECONDS - START)) -ge $TIMEOUT ]]; then
+  echo -e "${RED}❌ TestRun did not start within ${TIMEOUT}s${NC}"
+  echo "   Check: kubectl get testrun -n ${NAMESPACE}"
+  echo "   Logs:  kubectl logs -n ${NAMESPACE} -l k6_cr=${TESTRUN_NAME}"
+  exit 1
+fi
+
+# Show runner pod
+RUNNER_POD=$(kubectl get pods -n "${NAMESPACE}" -l "k6_cr=${TESTRUN_NAME}" \
+  --no-headers 2>/dev/null | head -1 | awk '{print $1}' || echo "")
+
 echo ""
-
-BASE_URL="http://localhost:8080" k6 run load-tests/k6-script.js
-
-echo -e "\n${GREEN}✅ Load test completed${NC}"
+echo -e "${GREEN}✅ Load test running${NC}"
+echo "   TestRun:    ${TESTRUN_NAME} (40 min, 8 VU sustained)"
+echo "   Runner pod: ${RUNNER_POD:-<starting>}"
 echo ""
-echo -e "${YELLOW}📊 Check results in Grafana:${NC}"
-echo "  - Application Observability dashboard"
-echo "  - Monitoring System Health dashboard"
+echo -e "${YELLOW}📊 Monitor:${NC}"
+echo "   kubectl get testrun ${TESTRUN_NAME} -n ${NAMESPACE}"
+echo "   kubectl logs -f -n ${NAMESPACE} ${RUNNER_POD:--l k6_cr=${TESTRUN_NAME}}"
+echo ""
+echo -e "${YELLOW}🛑 To stop:${NC}"
+echo "   kubectl delete testrun ${TESTRUN_NAME} -n ${NAMESPACE}"
 echo ""

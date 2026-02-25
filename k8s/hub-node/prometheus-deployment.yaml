@@ -31,6 +31,13 @@ spec:
         - '--web.console.templates=/usr/share/prometheus/consoles'
         - '--web.enable-remote-write-receiver'
         - '--enable-feature=exemplar-storage'
+        # Accept out-of-order metric samples (needed for queued metrics to be
+        # accepted by the remote-write endpoint after a link failure is restored).
+        # Note: --enable-feature=otlp-write-receiver is NOT used here because the
+        # Prometheus OTLP endpoint returns HTTP 400 for out-of-order samples (even
+        # with this flag), whereas the remote-write endpoint /api/v1/write silently
+        # skips them and returns 204 — so we use prometheusremotewrite exporter.
+        - '--enable-feature=out-of-order-ingestion'
         ports:
         - containerPort: 9090
           name: web

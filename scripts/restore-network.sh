@@ -2,56 +2,59 @@
 
 set -e
 
-# Colors for output
-RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+RED='\033[0;31m'
+NC='\033[0m'
 
-echo -e "${GREEN}🔌 Restoring Network Connectivity...${NC}"
+echo -e "${GREEN}🔌 Restoring Satellite Link...${NC}"
 echo "=========================================="
 
-echo -e "\n${GREEN}✓ Restoring OTel Collector config to valid endpoints...${NC}"
+EDGE_NODE="k3d-edge-observability-agent-0"
 
-# Restore the collector config to point to real services
-kubectl get configmap otel-collector-config -n observability -o yaml | \
-  sed 's|invalid-jaeger\.invalid:4317|jaeger\.observability\.svc\.cluster\.local:4317|g' | \
-  sed 's|http://invalid-prometheus\.invalid:9090|http://prometheus\.observability\.svc\.cluster\.local:9090|g' | \
-  sed 's|http://invalid-loki\.invalid:3100|http://loki\.observability\.svc\.cluster\.local:3100|g' | \
-  kubectl apply -f -
+if [ ! -f /tmp/otel-collector-pod-ip ]; then
+  echo -e "${RED}❌ Pod IP file not found. Run simulate-network-failure.sh first.${NC}"
+  exit 1
+fi
 
-echo -e "\n${YELLOW}⏳ Restarting OTel Collector to apply changes...${NC}"
-kubectl rollout restart deployment otel-collector -n observability
-kubectl rollout status deployment otel-collector -n observability --timeout=60s
+POD_IP=$(cat /tmp/otel-collector-pod-ip)
 
-echo -e "\n${GREEN}✓ Network connectivity restored${NC}"
+echo -e "\n${GREEN}✓ Removing iptables DROP rules for OTel Collector (${POD_IP})...${NC}"
+
+# Remove the three FORWARD DROP rules (exact match on rule spec)
+docker exec "$EDGE_NODE" iptables -D FORWARD \
+  -s "$POD_IP" -p tcp --dport 4317 -j DROP 2>/dev/null || true
+
+docker exec "$EDGE_NODE" iptables -D FORWARD \
+  -s "$POD_IP" -p tcp --dport 9090 -j DROP 2>/dev/null || true
+
+docker exec "$EDGE_NODE" iptables -D FORWARD \
+  -s "$POD_IP" -p tcp --dport 3100 -j DROP 2>/dev/null || true
+
+rm -f /tmp/otel-collector-pod-ip
+
+echo -e "\n${GREEN}✓ Link restored — OTel Collector can reach all backends again${NC}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${GREEN}  OTel Collector can now reach backends${NC}"
-echo -e "${GREEN}  (endpoints configured to valid addresses)${NC}"
+echo -e "${GREEN}  OTel Collector draining file-backed queues now${NC}"
+echo -e "${GREEN}  Expect a burst of data flowing to all three backends${NC}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
-echo -e "\n${YELLOW}📊 What's happening:${NC}"
-echo "  ✓ Network connectivity restored"
-echo "  ✓ OTel Collector draining queued data"
-echo "  ✓ Telemetry flowing to backends"
-echo "  ✓ No data loss!"
+echo -e "\n${YELLOW}📊 What is happening right now:${NC}"
+echo "  ✓ OTel Collector detects backends are reachable again"
+echo "  ✓ File-backed queues draining: traces → Jaeger"
+echo "  ✓ File-backed queues draining: logs → Loki"
+echo "  ✓ File-backed queues draining: metrics → Prometheus"
+echo "  ✓ Grafana gaps fill in (out-of-order ingestion enabled)"
 
-echo -e "\n${YELLOW}⏳ Queue should now be draining...${NC}"
-echo "  Watch the recovery in Grafana in real-time!"
-echo ""
-sleep 3
+echo -e "\n${YELLOW}👀 Open Grafana → 'Edge Pipeline' dashboard → RESILIENCE section:${NC}"
+echo "  - 'Export Throughput': spike above baseline (queue drain burst), then settles"
+echo "  - 'Trace Queue Depth': drops back to 0 (queue fully drained)"
 
-echo -e "\n${GREEN}✅ Network Restored!${NC}"
-echo ""
-echo -e "${YELLOW}💡 Verify in Grafana:${NC}"
-echo "  Open: http://localhost:30300"
-echo ""
-echo "  Dashboard: 'Edge Observability System'"
-echo "    - 'Persistent Queues' panel → Queue should decrease to 0"
-echo "    - 'Network Resilience: Queue Size' → Gauge returns to green"
-echo "    - 'Export Failures' → Should stop increasing"
-echo ""
-echo "  Dashboard: 'Application Observability'"
-echo "    - Check for data continuity (no gaps)"
-echo "    - All queued telemetry should now be visible"
+echo -e "\n${YELLOW}👀 Open Grafana → 'Vessel Operations' dashboard (time range: last 30m):${NC}"
+echo "  - Logs: entries from the failure window reappear with original timestamps"
+echo "  - Metrics: flat gap during outage, then resumes  (gap stays — expected)"
+
+echo -e "\n${YELLOW}👀 Open Jaeger:${NC}"
+echo "  - Traces from the failure window appear with original timestamps"
+echo "  - Logs in Grafana: click a trace_id to jump to the corresponding Jaeger trace"
 echo ""
