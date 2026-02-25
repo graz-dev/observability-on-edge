@@ -9,9 +9,6 @@ data:
       health_check:
         endpoint: 0.0.0.0:13133
 
-      pprof:
-        endpoint: 0.0.0.0:1777
-
       file_storage:
         directory: /var/lib/otelcol/file_storage
         timeout: 10s
@@ -120,7 +117,7 @@ data:
           max_elapsed_time: 300s
 
     service:
-      extensions: [health_check, pprof, file_storage]
+      extensions: [health_check, file_storage]
 
       pipelines:
         traces:
