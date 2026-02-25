@@ -247,7 +247,7 @@ After restore, set Grafana time range to "last 30 minutes":
 | Component | Node | Image | Role |
 |---|---|---|---|
 | **edge-demo-app** | edge | custom Go | Simulates maritime sensors; emits OTLP traces + metrics, structured JSON logs |
-| **OTel Collector** | edge | `otel/opentelemetry-collector-contrib:0.95.0` | Tail sampling, batching, file-backed queuing, fan-out to hub |
+| **OTel Collector** | edge | `ghcr.io/graz-dev/otel-collector-edge:0.1.0` | Tail sampling, batching, file-backed queuing, fan-out to hub |
 | **Fluent Bit** | edge | `fluent/fluent-bit:2.2` | Log collection, Lua filtering, OTLP HTTP push to collector |
 | **Jaeger** | hub | `jaegertracing/all-in-one:1.54` | Trace storage and UI |
 | **Prometheus** | hub | `prom/prometheus:v2.49.1` | Metrics storage, remote-write target |
@@ -531,9 +531,18 @@ Head sampling makes a random decision at request start, before any outcome is kn
 
 Tail sampling waits for the full trace, then decides based on outcome: error → keep, slow → keep, everything else → drop. The result is deterministic and preserves full fidelity for signals that matter. The cost is memory (for the buffer) and a `decision_wait` delay (~5s) before traces appear in Jaeger.
 
-### Why not a custom OTel Collector build?
+### Custom OTel Collector build
 
-`otelcol-builder.yaml` in this repo defines a custom OCB (OpenTelemetry Collector Builder) distribution with only the 9 components actually used. `otelcol-contrib` is ~250 MB; the custom build would be ~30 MB. In production, a smaller binary means faster cold starts, less disk pressure, and a reduced attack surface. For this demo we use `otelcol-contrib` to keep the setup command a single `kubectl apply`.
+This demo uses a minimal custom-built OTel Collector at [`ghcr.io/graz-dev/otel-collector-edge:0.1.0`](https://github.com/graz-dev/otel-collector-edge), built with the [OpenTelemetry Collector Builder (OCB)](https://github.com/open-telemetry/opentelemetry-collector/tree/main/cmd/builder). It includes only the 9 components actually used — no dead code from `otelcol-contrib`'s 150+ bundled components.
+
+| | `otelcol-contrib` | `otel-collector-edge` |
+|---|---|---|
+| Image size | ~250 MB | ~30 MB |
+| Binary size | ~200 MB | ~25 MB |
+| Components | 150+ | 9 |
+| Attack surface | large | minimal |
+
+The [dedicated repo](https://github.com/graz-dev/otel-collector-edge) contains the OCB manifest, Dockerfile, and a GitHub Actions workflow that builds multi-arch images (`linux/amd64` + `linux/arm64`) and publishes them to ghcr.io on every tag.
 
 ---
 
@@ -580,7 +589,7 @@ observability-on-edge/
 │   ├── restore-network.sh       # Remove DROP rules
 │   └── cleanup.sh               # Delete the k3d cluster
 │
-└── otelcol-builder.yaml         # OCB config for a minimal custom collector build
+└── architecture.mmd             # Mermaid source for the architecture diagram
 ```
 
 ---

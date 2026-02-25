@@ -67,6 +67,15 @@ echo -e "\n${YELLOW}📦 Importing application image to k3d...${NC}"
 k3d image import edge-demo-app:latest -c edge-observability
 echo -e "${GREEN}✓ Image imported${NC}"
 
+# Pre-pull the custom OTel Collector image on the Docker host so it is cached locally.
+# k3d image import fails for ghcr.io multi-arch images with BuildKit attestation
+# manifests (containerd cannot validate missing platform blobs). The pod will pull
+# directly from ghcr.io instead — the image is ~30 MB so this is fast enough.
+echo -e "\n${YELLOW}📦 Pre-pulling OTel Collector image (will pull from ghcr.io at pod start)...${NC}"
+ARCH=$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/')
+docker pull --platform "linux/${ARCH}" ghcr.io/graz-dev/otel-collector-edge:0.1.0 2>&1 | tail -1
+echo -e "${GREEN}✓ OTel Collector image cached on Docker host${NC}"
+
 # Create namespace
 echo -e "\n${YELLOW}📁 Creating namespace...${NC}"
 kubectl apply -f k8s/namespace.yaml
@@ -117,7 +126,7 @@ echo -e "\n${YELLOW}⚡ Deploying edge node components...${NC}"
 kubectl apply -f k8s/edge-node/
 
 echo -e "${YELLOW}⏳ Waiting for edge components to be ready...${NC}"
-kubectl wait --for=condition=ready pod -l app=otel-collector -n observability --timeout=180s
+kubectl wait --for=condition=ready pod -l app=otel-collector -n observability --timeout=300s
 kubectl wait --for=condition=ready pod -l app=edge-demo-app -n observability --timeout=180s
 
 echo -e "${GREEN}✓ Edge components ready${NC}"

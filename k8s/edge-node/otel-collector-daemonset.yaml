@@ -35,7 +35,7 @@ spec:
           effect: NoSchedule
       containers:
       - name: otel-collector
-        image: otel/opentelemetry-collector-contrib:0.95.0
+        image: ghcr.io/graz-dev/otel-collector-edge:0.1.0
         args:
         - --config=/conf/otel-collector-config.yaml
         securityContext:
