@@ -2,50 +2,64 @@
 
 set -e
 
-# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-echo -e "${YELLOW}🔌 Simulating Network Failure (config approach)...${NC}"
+echo -e "${YELLOW}🔌 Simulating Satellite Link Loss...${NC}"
 echo "=========================================="
 
-echo -e "\n${RED}⚠️  Modifying OTel Collector config to use invalid endpoints...${NC}"
+EDGE_NODE="k3d-edge-observability-agent-0"
 
-# Patch the collector config to point to non-existent services
-kubectl get configmap otel-collector-config -n observability -o yaml | \
-  sed 's|jaeger\.observability\.svc\.cluster\.local:4317|invalid-jaeger\.invalid:4317|g' | \
-  sed 's|http://prometheus\.observability\.svc\.cluster\.local:9090|http://invalid-prometheus\.invalid:9090|g' | \
-  sed 's|http://loki\.observability\.svc\.cluster\.local:3100|http://invalid-loki\.invalid:3100|g' | \
-  kubectl apply -f -
+# Get the OTel Collector pod IP (traffic blocking is per-source-IP so we only
+# affect the collector, not kubelet or Prometheus scraping from the hub)
+POD_IP=$(kubectl get pod -n observability -l app=otel-collector \
+  -o jsonpath='{.items[0].status.podIP}' 2>/dev/null)
 
-echo -e "\n${YELLOW}⏳ Restarting OTel Collector to apply changes...${NC}"
-kubectl rollout restart deployment otel-collector -n observability
-kubectl rollout status deployment otel-collector -n observability --timeout=60s
+if [ -z "$POD_IP" ]; then
+  echo -e "${RED}❌ OTel Collector pod not found. Is the demo running?${NC}"
+  exit 1
+fi
 
-echo -e "\n${GREEN}✓ Network failure simulated${NC}"
+# Save pod IP so restore-network.sh can reference the same rules
+echo "$POD_IP" > /tmp/otel-collector-pod-ip
+
+echo -e "\n${RED}⚠️  Blocking OTel Collector (${POD_IP}) → hub backends...${NC}"
+
+# Block FORWARD chain: OTel Collector → Jaeger OTLP (4317)
+docker exec "$EDGE_NODE" iptables -I FORWARD \
+  -s "$POD_IP" -p tcp --dport 4317 -j DROP
+
+# Block FORWARD chain: OTel Collector → Prometheus OTLP (9090)
+docker exec "$EDGE_NODE" iptables -I FORWARD \
+  -s "$POD_IP" -p tcp --dport 9090 -j DROP
+
+# Block FORWARD chain: OTel Collector → Loki (3100)
+docker exec "$EDGE_NODE" iptables -I FORWARD \
+  -s "$POD_IP" -p tcp --dport 3100 -j DROP
+
+echo -e "\n${GREEN}✓ Network failure simulated (NO pod restart — collector keeps running)${NC}"
 echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${RED}  OTel Collector CANNOT reach backends${NC}"
-echo -e "${RED}  (endpoints configured to invalid addresses)${NC}"
+echo -e "${RED}  Collector CANNOT reach: Jaeger / Prometheus / Loki${NC}"
+echo -e "${RED}  All three backends are unreachable from edge${NC}"
 echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
-echo -e "\n${YELLOW}📊 What's happening:${NC}"
-echo "  ✓ Application continues to run"
-echo "  ✓ OTel Collector receives telemetry"
-echo "  ✗ Cannot resolve invalid backend addresses"
-echo "  ✓ Data queued in persistent file storage"
-echo "  ✓ Backends still running (Grafana works!)"
+echo -e "\n${YELLOW}📊 What is happening right now:${NC}"
+echo "  ✓ Application (vessel sensors) continues running normally"
+echo "  ✓ OTel Collector receives all telemetry from the app"
+echo "  ✓ Fluent Bit still forwards logs to the OTel Collector"
+echo "  ✗ OTel Collector cannot export to Jaeger (TCP blocked)"
+echo "  ✗ OTel Collector cannot export to Prometheus (TCP blocked)"
+echo "  ✗ OTel Collector cannot export to Loki (TCP blocked)"
+echo "  ✓ Data queues to disk at /var/lib/otelcol/file_storage"
+echo "  ✓ Grafana and Jaeger still accessible (on hub node, unaffected)"
 
-echo -e "\n${YELLOW}💡 Monitor the queue buildup:${NC}"
-echo "  Open Grafana dashboard: http://localhost:30300"
-echo "  Navigate to: 'Edge Observability System'"
-echo "  Watch these panels:"
-echo "    - 'Persistent Queues' - Queue size will grow"
-echo "    - 'Network Resilience: Queue Size' - Gauge will increase"
-echo "    - 'Export Failures' - Will show failed export attempts"
-echo ""
+echo -e "\n${YELLOW}👀 Open Grafana → 'Edge Pipeline' dashboard → RESILIENCE section:${NC}"
+echo "  - 'Export Throughput' drops to zero (traces and logs)"
+echo "  - 'Trace Queue Depth' rises (batches accumulating on disk)"
+echo "  - Let it run for 90+ seconds for a visible queue drain spike on restore"
 
-echo -e "${YELLOW}🔄 To restore network:${NC}"
-echo "  Run: ./scripts/restore-network-config.sh"
+echo -e "\n${YELLOW}🔄 When ready to restore:${NC}"
+echo "  ./scripts/restore-network.sh"
 echo ""

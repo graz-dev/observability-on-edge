@@ -25,6 +25,9 @@ data:
               node_role: 'edge'
 
       - job_name: 'fluent-bit'
+        # Fluent Bit 2.x exposes Prometheus metrics at /api/v1/metrics/prometheus,
+        # not at the default /metrics path.
+        metrics_path: /api/v1/metrics/prometheus
         kubernetes_sd_configs:
           - role: pod
             namespaces:

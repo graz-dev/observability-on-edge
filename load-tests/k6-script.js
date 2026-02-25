@@ -9,12 +9,13 @@ const slowDiagnostics = new Counter('slow_diagnostics');
 const latency = new Trend('request_latency');
 
 // Test configuration - simulates vessel monitoring patterns
+// Duration: 40 min total — covers the full 25-min live demo + buffer.
+// Managed by the k6 Operator (TestRun CR), runs inside the cluster on the
+// edge node, connecting directly to the app via ClusterIP (no port-forward).
 export const options = {
   stages: [
-    { duration: '30s', target: 3 },   // Startup: systems coming online
-    { duration: '2m', target: 8 },    // Normal operation: regular monitoring
-    { duration: '1m', target: 15 },   // High activity: diagnostics running
-    { duration: '2m', target: 8 },    // Back to normal monitoring
+    { duration: '30s', target: 5 },   // Startup: systems coming online
+    { duration: '39m', target: 8 },   // Sustained: covers full demo + buffer
     { duration: '30s', target: 0 },   // Shutdown
   ],
   thresholds: {

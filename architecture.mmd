@@ -1,0 +1,35 @@
+flowchart TB
+    subgraph EDGE["🚢  VESSEL — Edge Node  (k3d agent-0)"]
+        subgraph APP["edge-demo-app  ·  Go + OpenTelemetry SDK"]
+            E1["/api/sensors/engine\n50–80 ms · 50% traffic · no errors"]
+            E2["/api/sensors/navigation\n40–60 ms · 30% traffic · no errors"]
+            E3["/api/analytics/diagnostics\n300–1500 ms · 12% traffic · no errors"]
+            E4["/api/alerts/system\n80–160 ms · 8% traffic · 20% error rate"]
+        end
+
+        FB["Fluent Bit\nLua filter: keep errors OR latency > 200 ms\n≈ 86% of logs dropped at source"]
+
+        COL["OTel Collector  (DaemonSet)\nReceiver: OTLP gRPC :4317 / HTTP :4318\nProcessor: tail_sampling  decision_wait=5s\n  • error-policy: status_code = ERROR\n  • latency-policy: threshold_ms = 200\n  → drops ≈ 85% of spans\nExtension: file_storage  (bbolt)\n  path: /var/lib/otelcol/file_storage\n  traces + logs queue persist across pod restarts\n  metrics: in-memory queue only"]
+    end
+
+    SAT(["🛰  Satellite Link\nsimulated via iptables DROP rules\nOn outage → data queues to disk, auto-flushes on restore"])
+
+    subgraph HUB["🏢  SHORE HUB — Hub Node  (k3d agent-1)"]
+        J["Jaeger  :4317\nTraces — gap-fills ✓\n(any timestamp accepted)"]
+        P["Prometheus  :9090\nMetrics — gap stays ✗\n(out-of-order samples dropped)"]
+        L["Loki  :3100\nLogs — gap-fills ✓\n(unordered_writes: true)"]
+        G["Grafana  :30300\nVessel Operations · Edge Pipeline"]
+    end
+
+    E1 & E2 & E3 & E4 -->|"OTLP gRPC — spans + metrics"| COL
+    E1 & E2 & E3 & E4 -.->|"stdout JSON — logs"| FB
+    FB -->|"OTLP HTTP — filtered logs"| COL
+
+    COL -->|"traces · file-backed queue"| SAT
+    COL -->|"metrics · memory queue"| SAT
+    COL -->|"logs · file-backed queue"| SAT
+
+    SAT -->|"OTLP gRPC"| J
+    SAT -->|"remote-write"| P
+    SAT -->|"push API"| L
+    J & P & L --> G
