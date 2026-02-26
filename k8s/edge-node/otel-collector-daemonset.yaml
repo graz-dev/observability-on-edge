@@ -86,8 +86,6 @@ spec:
       - name: config
         configMap:
           name: otel-collector-config
-      # hostPath ensures queued data survives pod restarts (critical for resilience story)
+      # emptyDir base; overlays/local patches to hostPath, overlays/civo patches to PVC
       - name: file-storage
-        hostPath:
-          path: /var/lib/otelcol/file_storage
-          type: DirectoryOrCreate
+        emptyDir: {}

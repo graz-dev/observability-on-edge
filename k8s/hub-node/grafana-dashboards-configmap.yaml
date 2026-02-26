@@ -516,7 +516,7 @@ data:
 
         {
           "datasource": "Prometheus",
-          "description": "Total batches in the file-backed persistent queue across all exporters (traces → Jaeger, logs → Loki). Rises during a network outage as data accumulates on disk; drops back to 0 after link restore when the backlog drains. Each unit = one batch (up to 512 items). In OTel v0.95, queue_size is emitted by whichever exporter last had activity — sum() captures both. Note: bbolt files on disk do not shrink after drain (high-water mark behaviour); this metric is the authoritative real-time queue depth.",
+          "description": "Total batches in the file-backed persistent queue across all exporters (traces → Jaeger, logs → Loki). Rises during a network outage as data accumulates on disk; drops back to 0 after link restore when the backlog drains. Each unit = one batch (up to 512 items). With num_consumers=1, each exporter processes one batch at a time — all pending batches stay visible in bbolt until sent. Note: bbolt files on disk do not shrink after drain (high-water mark behaviour); this metric is the authoritative real-time queue depth.",
           "fieldConfig": {
             "defaults": {
               "color": {"mode": "fixed", "fixedColor": "yellow"},

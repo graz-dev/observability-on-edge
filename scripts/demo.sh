@@ -4,24 +4,59 @@
 #  "Making Observability Work at the Edge" — KubeCon EU 2026
 #
 #  Usage:
-#    ./scripts/demo.sh          # full run (Act 1 → 2 → 3)
+#    ./scripts/demo.sh [--env local|civo] [1|2|3]
+#    ./scripts/demo.sh          # full run (Act 1 → 2 → 3), local
 #    ./scripts/demo.sh 2        # start from Act 2
-#    ./scripts/demo.sh 3        # start from Act 3 (failure/restore only)
+#    ./scripts/demo.sh --env civo 3  # Act 3 on Civo
 #
-#  Requires: kubectl, curl, python3, docker
+#  Requires: kubectl, curl, python3
 # ============================================================
 
 set -euo pipefail
 
+# ── Arg parsing ─────────────────────────────────────────────
+DEMO_ENV="local"
+START_ACT="1"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --env) DEMO_ENV="$2"; shift 2;;
+    [123]) START_ACT="$1"; shift;;
+    *) shift;;
+  esac
+done
+
+if [[ "$DEMO_ENV" != "local" && "$DEMO_ENV" != "civo" ]]; then
+  echo "Usage: $(basename "$0") [--env local|civo] [1|2|3]"
+  exit 1
+fi
+
+if ! [[ "$START_ACT" =~ ^[123]$ ]]; then
+  echo "Usage: $(basename "$0") [--env local|civo] [1|2|3]"
+  echo "  1  Full run: pre-flight → Act 1 → Act 2 → Act 3  (default)"
+  echo "  2  Start at Act 2 (sampling)"
+  echo "  3  Start at Act 3 (failure/restore only)"
+  exit 1
+fi
+
 # ── Constants ──────────────────────────────────────────────
 NAMESPACE="observability"
-EDGE_NODE="k3d-edge-observability-agent-0"
-GRAFANA_URL="http://localhost:30300"
-JAEGER_URL="http://localhost:30686"
 PROM_LOCAL_PORT=19090
 TESTRUN_NAME="vessel-monitoring"
 FAILURE_DURATION=90   # seconds to hold the link down
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ── Access URLs (env-dependent) ─────────────────────────────
+if [[ "$DEMO_ENV" == "civo" ]]; then
+  GRAFANA_LB=$(kubectl get svc grafana -n "${NAMESPACE}" \
+    -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+  JAEGER_LB=$(kubectl get svc jaeger -n "${NAMESPACE}" \
+    -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+  GRAFANA_URL="http://${GRAFANA_LB}:3000"
+  JAEGER_URL="http://${JAEGER_LB}:16686"
+else
+  GRAFANA_URL="http://localhost:30300"
+  JAEGER_URL="http://localhost:30686"
+fi
 
 # ── Colors ─────────────────────────────────────────────────
 R='\033[0;31m'; G='\033[0;32m'; Y='\033[1;33m'
@@ -152,21 +187,23 @@ preflight() {
   # kubectl context
   local ctx
   ctx=$(kubectl config current-context 2>/dev/null || echo "none")
-  if [[ "$ctx" == *"edge-observability"* ]]; then
-    ok "kubectl context: ${ctx}"
+  if [[ "$DEMO_ENV" == "local" ]]; then
+    if [[ "$ctx" == *"edge-observability"* ]]; then
+      ok "kubectl context: ${ctx}"
+    else
+      fail "Wrong context '${ctx}'. Expected 'k3d-edge-observability'. Run setup.sh."
+      exit 1
+    fi
   else
-    fail "Wrong context '${ctx}'. Expected 'k3d-edge-observability'. Run setup.sh."
-    exit 1
+    ok "kubectl context: ${ctx}"
   fi
 
   # Namespace
   kubectl get namespace "${NAMESPACE}" &>/dev/null \
     && ok "Namespace '${NAMESPACE}' exists" \
-    || { fail "Namespace '${NAMESPACE}' missing — run ./scripts/setup.sh"; exit 1; }
+    || { fail "Namespace '${NAMESPACE}' missing — run ./scripts/setup.sh --env ${DEMO_ENV}"; exit 1; }
 
   # All pods Running
-  # grep -v exits 1 when all pods are Running (no non-matching lines) — || echo "0" prevents
-  # set -euo pipefail from aborting on the correct case.
   local not_running
   not_running=$(kubectl get pods -n "${NAMESPACE}" --no-headers 2>/dev/null \
     | { grep -v -E "(Running|Completed|Succeeded)" || true; } \
@@ -219,14 +256,24 @@ preflight() {
   fi
 
   # No stale iptables rules from a previous run
-  # grep -c exits with code 1 when count is 0 → use || true to avoid pipefail abort
-  local stale_rules
-  stale_rules=$(docker exec "${EDGE_NODE}" \
-    iptables -L FORWARD -n 2>/dev/null | { grep -c DROP || true; })
-  if [[ "$stale_rules" -eq 0 ]]; then
-    ok "No stale iptables DROP rules on edge node"
+  local CHAOS_POD
+  CHAOS_POD=$(kubectl get pod -n "${NAMESPACE}" -l app=network-chaos \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+  if [[ -n "$CHAOS_POD" ]]; then
+    local stale_rules
+    # Check both iptables backends (nft and legacy) — k3d may use either.
+    # Use { grep -c DROP || true; } so grep's exit-1-on-no-match doesn't trigger
+    # the outer || echo 0, which would produce "0\n0" and break [[ -eq 0 ]].
+    stale_rules=$(kubectl exec -n "${NAMESPACE}" "$CHAOS_POD" -- sh -c \
+      '{ iptables -L FORWARD -n 2>/dev/null; iptables-legacy -L FORWARD -n 2>/dev/null; } | { grep -c DROP || true; }' \
+      2>/dev/null || echo 0)
+    if [[ "$stale_rules" -eq 0 ]]; then
+      ok "No stale iptables DROP rules on edge node"
+    else
+      warn "${stale_rules} DROP rule(s) still in FORWARD chain — run ./scripts/restore-network.sh"
+    fi
   else
-    warn "${stale_rules} DROP rule(s) still in FORWARD chain — run ./scripts/restore-network.sh"
+    warn "network-chaos pod not found — cannot check iptables rules"
   fi
 }
 
@@ -376,8 +423,39 @@ Watch 'Trace Queue Depth' start rising."
   sleep 8
   echo ""
   echo -e "  ${B}→ File storage on edge node (queued batches):${NC}"
-  docker exec "${EDGE_NODE}" ls -lah /var/lib/otelcol/file_storage/ 2>/dev/null \
-    | sed 's/^/    /' || warn "Could not read file storage"
+  local COLLECTOR_POD CHAOS_POD_ACT3
+  COLLECTOR_POD=$(kubectl get pod -n "${NAMESPACE}" -l app=otel-collector \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+  CHAOS_POD_ACT3=$(kubectl get pod -n "${NAMESPACE}" -l app=network-chaos \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+
+  # On local (k3d): chaos pod mounts the same hostPath as the collector → can list files.
+  # On Civo: collector is distroless (no ls/find) and chaos pod mounts a hostPath that
+  # is separate from the PVC where the collector actually writes → show PVC usage instead.
+  _show_file_storage() {
+    if [[ "$DEMO_ENV" == "local" ]]; then
+      { [[ -n "$COLLECTOR_POD" ]] && \
+          kubectl exec -n "${NAMESPACE}" "$COLLECTOR_POD" -- \
+            ls -lah /var/lib/otelcol/file_storage/ 2>/dev/null; } || \
+      { [[ -n "$CHAOS_POD_ACT3" ]] && \
+          kubectl exec -n "${NAMESPACE}" "$CHAOS_POD_ACT3" -- \
+            ls -lah /var/lib/otelcol/file_storage/ 2>/dev/null; } || \
+      echo "    (file storage not readable)"
+    else
+      # Civo: collector writes to PVC (civo-volume block storage).
+      # The collector image is distroless — no shell to exec into.
+      # Show PVC capacity and the collector's accepted-vs-exported span delta instead.
+      local pvc_capacity accepted exported queued
+      pvc_capacity=$(kubectl get pvc otelcol-file-storage -n "${NAMESPACE}" \
+        -o jsonpath='{.status.capacity.storage}' 2>/dev/null || echo "?")
+      accepted=$(prom_value 'sum(increase(otelcol_receiver_accepted_spans[2m]))')
+      exported=$(prom_value 'sum(increase(otelcol_exporter_sent_spans[2m]))')
+      queued=$(python3 -c "print(int(max(0, float('${accepted}') - float('${exported}'))))" 2>/dev/null || echo "?")
+      echo "    PVC otelcol-file-storage (${pvc_capacity}) — writing bbolt files"
+      echo "    ~${queued} spans accumulated in queue since link went down"
+    fi
+  }
+  _show_file_storage | sed 's/^/    /'
 
   echo ""
   echo -e "  ${Y}Holding for ${FAILURE_DURATION}s — watch the queue depth rise in Grafana${NC}"
@@ -386,8 +464,7 @@ Watch 'Trace Queue Depth' start rising."
   # Snapshot file storage at end of outage
   echo ""
   echo -e "  ${B}→ File storage after ${FAILURE_DURATION}s outage:${NC}"
-  docker exec "${EDGE_NODE}" ls -lah /var/lib/otelcol/file_storage/ 2>/dev/null \
-    | sed 's/^/    /' || warn "Could not read file storage"
+  _show_file_storage | sed 's/^/    /'
 
   FAILURE_END=$(date +%s)
   local duration=$(( FAILURE_END - FAILURE_START ))
@@ -447,8 +524,6 @@ Set time range to 'last 30m' to see the gap."
   local end_us=$(( FAILURE_END * 1000000 ))
   local trace_count
   # Note: Jaeger requires service= param for time-range queries; python3 handles JSON errors.
-  # Avoid "|| echo 0" after a pipeline — with pipefail, curl failure + python3 printing 0
-  # would capture "0\n0" causing [[: syntax error.
   trace_count=$(curl -sf \
     "${JAEGER_URL}/api/traces?service=edge-demo-app&start=${start_us}&end=${end_us}&limit=10" \
     | python3 -c "
@@ -523,18 +598,8 @@ trap 'cleanup' EXIT
 trap 'cleanup; echo -e "\n${Y}Demo interrupted.${NC}"; exit 1' INT TERM
 
 # ── Entry point ─────────────────────────────────────────────
-START_ACT="${1:-1}"
-
-if ! [[ "$START_ACT" =~ ^[123]$ ]]; then
-  echo "Usage: $(basename "$0") [1|2|3]"
-  echo "  1  Full run: pre-flight → Act 1 → Act 2 → Act 3  (default)"
-  echo "  2  Start at Act 2 (sampling)"
-  echo "  3  Start at Act 3 (failure/restore only)"
-  exit 1
-fi
-
 header "Making Observability Work at the Edge"
-echo -e "  ${DIM}KubeCon EU 2026 — orchestrated demo runner${NC}"
+echo -e "  ${DIM}KubeCon EU 2026 — orchestrated demo runner [env: ${DEMO_ENV}]${NC}"
 echo -e "  ${DIM}Grafana: ${GRAFANA_URL}  |  Jaeger: ${JAEGER_URL}${NC}"
 
 start_prom_pf   # must come before preflight (preflight calls prom_value)

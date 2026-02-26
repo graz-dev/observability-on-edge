@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Base listing — used by overlays/local and overlays/civo.
+# For direct apply without overlays: kubectl apply -k k8s/
+resources:
+  - namespace.yaml
+  - edge-node/app-deployment.yaml
+  - edge-node/app-service.yaml
+  - edge-node/fluentbit-config.yaml
+  - edge-node/fluentbit-daemonset.yaml
+  - edge-node/network-chaos-daemonset.yaml
+  - edge-node/otel-collector-config.yaml
+  - edge-node/otel-collector-daemonset.yaml
+  - edge-node/otel-collector-service.yaml
+  - hub-node/grafana-config.yaml
+  - hub-node/grafana-dashboards-configmap.yaml
+  - hub-node/grafana-deployment.yaml
+  - hub-node/grafana-service.yaml
+  - hub-node/jaeger-deployment.yaml
+  - hub-node/jaeger-service.yaml
+  - hub-node/loki-config.yaml
+  - hub-node/loki-deployment.yaml
+  - hub-node/loki-service.yaml
+  - hub-node/prometheus-config.yaml
+  - hub-node/prometheus-deployment.yaml
+  - hub-node/prometheus-service.yaml
+  - load-test/k6-script-configmap.yaml
