@@ -42,7 +42,7 @@ A production-realistic demo of the full observability stack for edge computing: 
 
 ```mermaid
 flowchart TB
-    subgraph EDGE["🚢  VESSEL — Edge Node  (k3d agent-0)"]
+    subgraph EDGE["🚢  VESSEL — Edge Node  (node-role=edge)"]
         subgraph APP["edge-demo-app  ·  Go + OpenTelemetry SDK"]
             E1["/api/sensors/engine\n50–80 ms · 50% traffic · no errors"]
             E2["/api/sensors/navigation\n40–60 ms · 30% traffic · no errors"]
@@ -57,7 +57,7 @@ flowchart TB
 
     SAT(["🛰  Satellite Link\nsimulated via iptables DROP rules\nOn outage → data queues to disk, auto-flushes on restore"])
 
-    subgraph HUB["🏢  SHORE HUB — Hub Node  (k3d agent-1)"]
+    subgraph HUB["🏢  SHORE HUB — Hub Node  (node-role=hub)"]
         J["Jaeger  :4317\nTraces — gap-fills ✓\n(any timestamp accepted)"]
         P["Prometheus  :9090\nMetrics — gap stays ✗\n(out-of-order samples dropped)"]
         L["Loki  :3100\nLogs — gap-fills ✓\n(unordered_writes: true)"]
@@ -83,9 +83,9 @@ flowchart TB
 
 ### Why two nodes?
 
-k3d creates one `agent-0` (labelled `node-role=edge`) and one `agent-1` (labelled `node-role=hub`). All Kubernetes manifests use `nodeSelector` to pin workloads to the right node. Traffic between them crosses the k3d virtual network — the same bridge the iptables rules later block.
+One node is labelled `node-role=edge`, the other `node-role=hub`. All Kubernetes manifests use `nodeSelector` to pin workloads to the right node. Traffic between them crosses the cluster network — the same path the iptables rules later block.
 
-This is not cosmetic: when we add a DROP rule to the FORWARD chain of the edge node's container, packets stop flowing across the virtual WAN link exactly as they would in a real satellite failure.
+This is not cosmetic: when we add a DROP rule to the FORWARD chain of the edge node, packets stop flowing across the virtual WAN link exactly as they would in a real satellite failure. The `network-chaos` DaemonSet (a privileged `nicolaka/netshoot` pod with `hostNetwork: true`) provides the iptables access that works identically on both local and cloud environments.
 
 ---
 
@@ -185,17 +185,24 @@ docker exec k3d-edge-observability-agent-0 ls -lah /var/lib/otelcol/file_storage
 
 **Important:** bbolt never shrinks pages — files grow during outages but do not reduce after the queue drains. The authoritative queue depth is the metric `sum(otelcol_exporter_queue_size)`, not the file size.
 
-**The queue volume is mounted via `hostPath`:**
+**The queue volume type depends on the environment:**
 
 ```yaml
+# local overlay (overlays/local) — hostPath, survives pod restarts on the same node
 volumes:
   - name: file-storage
     hostPath:
       path: /var/lib/otelcol/file_storage
       type: DirectoryOrCreate
+
+# Civo overlay (overlays/civo) — PersistentVolumeClaim, survives node rescheduling
+volumes:
+  - name: file-storage
+    persistentVolumeClaim:
+      claimName: otelcol-file-storage  # 1Gi, local-path StorageClass
 ```
 
-Queue data survives pod restarts, OOM kills, and node maintenance windows. A new pod reads from the same directory and drains the backlog. In production you would use a dedicated PersistentVolume, but `hostPath` is correct for a single-node edge device.
+Queue data survives pod restarts, OOM kills, and node maintenance windows. A new pod reads from the same directory and drains the backlog.
 
 **Retry backoff:** first failure waits `initial_interval: 5s`, then 10s, 20s, 30s, 30s... Permanent drop after `max_elapsed_time: 300s`. Size your queue to cover your worst-case outage duration × data rate.
 
@@ -249,6 +256,7 @@ After restore, set Grafana time range to "last 30 minutes":
 | **edge-demo-app** | edge | custom Go | Simulates maritime sensors; emits OTLP traces + metrics, structured JSON logs |
 | **OTel Collector** | edge | `ghcr.io/graz-dev/otel-collector-edge:0.1.0` | Tail sampling, batching, file-backed queuing, fan-out to hub |
 | **Fluent Bit** | edge | `fluent/fluent-bit:2.2` | Log collection, Lua filtering, OTLP HTTP push to collector |
+| **network-chaos** | edge | `nicolaka/netshoot` | Privileged pod (`hostNetwork: true`) used to apply/remove iptables rules for link simulation |
 | **Jaeger** | hub | `jaegertracing/all-in-one:1.54` | Trace storage and UI |
 | **Prometheus** | hub | `prom/prometheus:v2.49.1` | Metrics storage, remote-write target |
 | **Loki** | hub | `grafana/loki:2.9.4` | Log aggregation with out-of-order ingestion |
@@ -272,7 +280,9 @@ The load test is managed by the [k6 Operator](https://github.com/grafana/k6-oper
 
 ## Quick Start
 
-### Prerequisites
+The demo supports two environments: **local** (k3d on Docker) and **Civo** (managed K3s cloud cluster). Both use the same scripts with a `--env` flag.
+
+### Prerequisites — local
 
 ```bash
 # macOS
@@ -286,20 +296,40 @@ kubectl version     # 1.28+
 
 Docker Desktop must be running. k3d uses Docker containers as Kubernetes nodes.
 
-### Setup (~5 minutes)
+### Prerequisites — Civo
+
+```bash
+brew install kubectl
+# Install civo CLI: https://github.com/civo/cli
+civo apikey save my-key <YOUR_API_KEY>
+```
+
+Node requirements: 2 × `g4s.kube.large` (4 vCPU / 8 GB) — the default. Use a larger region like `LON1` or `FRA1` for predictable latency at KubeCon EU.
+
+### Setup (~5 min local · ~10 min Civo)
 
 ```bash
 git clone <repo-url>
 cd observability-on-edge
+
+# Local (k3d)
 ./scripts/setup.sh
+
+# Civo — creates the cluster, deploys everything
+./scripts/setup.sh --env civo
+./scripts/setup.sh --env civo --region FRA1          # Frankfurt
+./scripts/setup.sh --env civo --size g4s.kube.medium # budget run
 ```
 
-`setup.sh` builds the app image, creates the k3d cluster, labels nodes, installs the k6 Operator, and deploys all workloads. Expected output:
+`setup.sh` builds/imports the app image, creates the cluster, labels nodes, installs the k6 Operator, and deploys all workloads via Kustomize overlays. Expected output:
 
 ```
 ✅ Setup Complete!
-   Grafana:  http://localhost:30300  (admin / admin)
-   Jaeger:   http://localhost:30686
+   Grafana:  http://localhost:30300       (local)
+             http://<LB-IP>:3000         (Civo)
+   Jaeger:   http://localhost:30686      (local)
+             http://<LB-IP>:16686        (Civo)
+   admin / admin
 ```
 
 ### Start load test
@@ -313,9 +343,9 @@ Creates a `TestRun` CR. The k6 Operator starts a runner pod. Leave it running fo
 ### Run the demo
 
 ```bash
-./scripts/demo.sh          # full run: preflight → Act 1 → Act 2 → Act 3
-./scripts/demo.sh 2        # start at Act 2 (sampling)
-./scripts/demo.sh 3        # start at Act 3 (failure/restore only)
+./scripts/demo.sh                    # local, full run: preflight → Act 1 → Act 2 → Act 3
+./scripts/demo.sh 2                  # start at Act 2 (sampling)
+./scripts/demo.sh --env civo 3       # Civo, Act 3 only (failure/restore)
 ```
 
 `demo.sh` runs preflight checks, guides through each act interactively, automates the network failure and restore, and prints a pass/fail summary.
@@ -323,7 +353,9 @@ Creates a `TestRun` CR. The k6 Operator starts a runner pod. Leave it running fo
 ### Cleanup
 
 ```bash
-./scripts/cleanup.sh       # deletes the k3d cluster and all data
+./scripts/cleanup.sh                 # local: deletes k3d cluster
+./scripts/cleanup.sh --env civo      # Civo: deletes the cloud cluster (LON1)
+./scripts/cleanup.sh --env civo --region FRA1
 ```
 
 ---
@@ -368,7 +400,9 @@ Adds iptables DROP rules on the edge node's FORWARD chain. No pod restarts. The 
 
 **Inspect the files on disk:**
 ```bash
-docker exec k3d-edge-observability-agent-0 ls -lah /var/lib/otelcol/file_storage/
+COLLECTOR_POD=$(kubectl get pod -n observability -l app=otel-collector \
+  -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n observability "$COLLECTOR_POD" -- ls -lah /var/lib/otelcol/file_storage/
 ```
 
 Wait at least 90 seconds for a visible drain spike on restore.
@@ -511,7 +545,9 @@ Prometheus scrapes the collector's built-in metrics endpoint (`:8888`), which ex
 
 ### Why iptables DROP instead of a Kubernetes NetworkPolicy?
 
-k3d uses Flannel without network policy support by default. More importantly, a NetworkPolicy requires a Kubernetes API call to apply and remove — adding latency and a dependency on the control plane. iptables rules on the node container are instant, surgical (target the exact collector pod IP), and fully reversible. The FORWARD chain is the right place because pod-to-pod traffic crosses the node's bridge, not the host's OUTPUT chain.
+k3d uses Flannel without network policy support by default. More importantly, a NetworkPolicy requires a Kubernetes API call to apply and remove — adding latency and a dependency on the control plane. iptables rules on the node are instant, surgical (target the exact collector pod IP), and fully reversible. The FORWARD chain is the right place because pod-to-pod traffic crosses the node's bridge, not the host's OUTPUT chain.
+
+The `network-chaos` DaemonSet (`nicolaka/netshoot`, `hostNetwork: true`, `privileged: true`) provides a consistent interface for iptables on both local and Civo: `kubectl exec -n observability $CHAOS_POD -- iptables ...`. No `docker exec` needed anywhere.
 
 ### Why `prometheusremotewrite` instead of `otlphttp/prometheus`?
 
@@ -558,36 +594,54 @@ observability-on-edge/
 │   ├── go.mod
 │   └── Dockerfile
 │
-├── k8s/
+├── k8s/                         # Base Kubernetes manifests (env-agnostic)
+│   ├── kustomization.yaml       # Base resource listing (used by overlays)
 │   ├── namespace.yaml
 │   ├── edge-node/               # Workloads pinned to node-role=edge
 │   │   ├── app-deployment.yaml
 │   │   ├── app-service.yaml
-│   │   ├── otel-collector-daemonset.yaml
+│   │   ├── network-chaos-daemonset.yaml  ← privileged pod for iptables
+│   │   ├── otel-collector-daemonset.yaml ← emptyDir base; volume patched by overlay
 │   │   ├── otel-collector-service.yaml
-│   │   ├── otel-collector-config.yaml   ← tail_sampling + queue config
+│   │   ├── otel-collector-config.yaml    ← tail_sampling + queue config
 │   │   ├── fluentbit-daemonset.yaml
-│   │   └── fluentbit-config.yaml        ← Lua filter + OTLP HTTP output
+│   │   └── fluentbit-config.yaml         ← Lua filter + OTLP HTTP output
 │   ├── hub-node/                # Workloads pinned to node-role=hub
-│   │   ├── jaeger-{deployment,service}.yaml
+│   │   ├── jaeger-{deployment,service}.yaml     ← ClusterIP base
 │   │   ├── prometheus-{deployment,service,config}.yaml
 │   │   ├── loki-{deployment,service,config}.yaml
-│   │   ├── grafana-{deployment,service,config}.yaml
-│   │   └── grafana-dashboards-configmap.yaml  ← full dashboard JSON
+│   │   ├── grafana-{deployment,service,config}.yaml  ← ClusterIP base
+│   │   └── grafana-dashboards-configmap.yaml    ← full dashboard JSON
 │   └── load-test/
 │       ├── k6-script-configmap.yaml
-│       └── testrun.yaml                 ← k6 Operator TestRun CR
+│       └── testrun.yaml                  ← k6 Operator TestRun CR
+│
+├── overlays/                    # Kustomize environment overlays
+│   ├── local/                   # k3d: NodePort services + hostPath volume
+│   │   ├── kustomization.yaml
+│   │   └── patches/
+│   │       ├── otelcol-hostpath.yaml   ← hostPath /var/lib/otelcol/file_storage
+│   │       ├── grafana-nodeport.yaml   ← NodePort 30300
+│   │       └── jaeger-nodeport.yaml    ← NodePort 30686
+│   └── civo/                    # Civo K3s: LoadBalancer services + PVC volume
+│       ├── kustomization.yaml
+│       ├── patches/
+│       │   ├── otelcol-pvc.yaml        ← PVC otelcol-file-storage
+│       │   ├── grafana-lb.yaml         ← LoadBalancer
+│       │   └── jaeger-lb.yaml          ← LoadBalancer
+│       └── resources/
+│           └── otelcol-pvc.yaml        ← PVC definition (1Gi, local-path)
 │
 ├── load-tests/
 │   └── k6-script.js             # 40-min, 8 VU, 4-endpoint traffic mix
 │
 ├── scripts/
-│   ├── setup.sh                 # Full cluster setup (run once)
+│   ├── setup.sh                 # Cluster + stack setup (--env local|civo)
 │   ├── load-generator.sh        # Create/recreate the TestRun CR
-│   ├── demo.sh                  # Orchestrated demo runner (Acts 1–3)
-│   ├── simulate-network-failure.sh  # Apply iptables DROP rules
-│   ├── restore-network.sh       # Remove DROP rules
-│   └── cleanup.sh               # Delete the k3d cluster
+│   ├── demo.sh                  # Orchestrated demo runner (--env, Acts 1–3)
+│   ├── simulate-network-failure.sh  # kubectl exec → network-chaos → iptables DROP
+│   ├── restore-network.sh           # kubectl exec → network-chaos → iptables -D
+│   └── cleanup.sh               # Delete cluster (--env local|civo)
 │
 └── architecture.mmd             # Mermaid source for the architecture diagram
 ```
@@ -630,19 +684,24 @@ Check the Prometheus data source connection in Grafana → Data Sources → Prom
 ### Stale iptables rules after a failed run
 
 ```bash
+./scripts/restore-network.sh
+# or manually:
+CHAOS_POD=$(kubectl get pod -n observability -l app=network-chaos \
+  -o jsonpath='{.items[0].metadata.name}')
 POD_IP=$(kubectl get pod -n observability -l app=otel-collector \
   -o jsonpath='{.items[0].status.podIP}')
-NODE="k3d-edge-observability-agent-0"
-docker exec "$NODE" iptables -D FORWARD -s $POD_IP -p tcp --dport 4317 -j DROP 2>/dev/null || true
-docker exec "$NODE" iptables -D FORWARD -s $POD_IP -p tcp --dport 9090 -j DROP 2>/dev/null || true
-docker exec "$NODE" iptables -D FORWARD -s $POD_IP -p tcp --dport 3100 -j DROP 2>/dev/null || true
+kubectl exec -n observability "$CHAOS_POD" -- iptables -D FORWARD -s $POD_IP -p tcp --dport 4317 -j DROP 2>/dev/null || true
+kubectl exec -n observability "$CHAOS_POD" -- iptables -D FORWARD -s $POD_IP -p tcp --dport 9090 -j DROP 2>/dev/null || true
+kubectl exec -n observability "$CHAOS_POD" -- iptables -D FORWARD -s $POD_IP -p tcp --dport 3100 -j DROP 2>/dev/null || true
 ```
 
 ### Rerunning Act 3 cleanly
 
 ```bash
 # Clear the file storage queue
-docker exec k3d-edge-observability-agent-0 \
+COLLECTOR_POD=$(kubectl get pod -n observability -l app=otel-collector \
+  -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n observability "$COLLECTOR_POD" -- \
   find /var/lib/otelcol/file_storage -type f -delete
 kubectl rollout restart daemonset/otel-collector -n observability
 kubectl rollout status daemonset/otel-collector -n observability --timeout=60s

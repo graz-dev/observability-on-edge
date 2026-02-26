@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../k8s
+  - resources/otelcol-pvc.yaml
+
+patches:
+  - path: patches/otelcol-pvc.yaml
+    target:
+      kind: DaemonSet
+      name: otel-collector
+  - path: patches/app-deployment.yaml
+    target:
+      kind: Deployment
+      name: edge-demo-app
+  - path: patches/grafana-lb.yaml
+  - path: patches/jaeger-lb.yaml

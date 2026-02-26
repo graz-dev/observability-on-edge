@@ -10,7 +10,14 @@ NC='\033[0m'
 echo -e "${GREEN}🔌 Restoring Satellite Link...${NC}"
 echo "=========================================="
 
-EDGE_NODE="k3d-edge-observability-agent-0"
+# Get the network-chaos pod (privileged, hostNetwork — iptables commands affect the node directly)
+CHAOS_POD=$(kubectl get pod -n observability -l app=network-chaos \
+  -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+
+if [ -z "$CHAOS_POD" ]; then
+  echo -e "${RED}❌ network-chaos pod not found. Is the demo running?${NC}"
+  exit 1
+fi
 
 if [ ! -f /tmp/otel-collector-pod-ip ]; then
   echo -e "${RED}❌ Pod IP file not found. Run simulate-network-failure.sh first.${NC}"
@@ -21,15 +28,17 @@ POD_IP=$(cat /tmp/otel-collector-pod-ip)
 
 echo -e "\n${GREEN}✓ Removing iptables DROP rules for OTel Collector (${POD_IP})...${NC}"
 
-# Remove the three FORWARD DROP rules (exact match on rule spec)
-docker exec "$EDGE_NODE" iptables -D FORWARD \
-  -s "$POD_IP" -p tcp --dport 4317 -j DROP 2>/dev/null || true
+# Helper: remove DROP rule from BOTH iptables backends (mirrors the dual-insert in simulate).
+_undrop() {
+  local dport="$1"
+  kubectl exec -n observability "$CHAOS_POD" -- sh -c \
+    "iptables        -D FORWARD -s ${POD_IP} -p tcp --dport ${dport} -j DROP 2>/dev/null || true
+     iptables-legacy -D FORWARD -s ${POD_IP} -p tcp --dport ${dport} -j DROP 2>/dev/null || true"
+}
 
-docker exec "$EDGE_NODE" iptables -D FORWARD \
-  -s "$POD_IP" -p tcp --dport 9090 -j DROP 2>/dev/null || true
-
-docker exec "$EDGE_NODE" iptables -D FORWARD \
-  -s "$POD_IP" -p tcp --dport 3100 -j DROP 2>/dev/null || true
+_undrop 4317   # Jaeger OTLP gRPC
+_undrop 9090   # Prometheus remote-write
+_undrop 3100   # Loki push
 
 rm -f /tmp/otel-collector-pod-ip
 

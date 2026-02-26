@@ -1,0 +1,10 @@
+- op: replace
+  path: /spec/template/spec/volumes
+  value:
+    - name: config
+      configMap:
+        name: otel-collector-config
+    - name: file-storage
+      hostPath:
+        path: /var/lib/otelcol/file_storage
+        type: DirectoryOrCreate

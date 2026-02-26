@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: network-chaos
+  namespace: observability
+  labels:
+    app: network-chaos
+spec:
+  selector:
+    matchLabels:
+      app: network-chaos
+  template:
+    metadata:
+      labels:
+        app: network-chaos
+    spec:
+      hostNetwork: true
+      nodeSelector:
+        node-role: edge
+      tolerations:
+        - operator: Exists
+          effect: NoSchedule
+      containers:
+      - name: netshoot
+        image: nicolaka/netshoot:latest
+        command: ["sleep", "infinity"]
+        securityContext:
+          privileged: true
+        resources:
+          requests:
+            cpu: "10m"
+            memory: "32Mi"
+          limits:
+            cpu: "50m"
+            memory: "64Mi"
+        volumeMounts:
+        - name: file-storage
+          mountPath: /var/lib/otelcol/file_storage
+      volumes:
+      - name: file-storage
+        hostPath:
+          path: /var/lib/otelcol/file_storage
+          type: DirectoryOrCreate

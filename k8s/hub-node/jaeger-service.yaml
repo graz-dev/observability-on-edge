@@ -6,13 +6,12 @@ metadata:
   labels:
     app: jaeger
 spec:
-  type: NodePort
+  type: ClusterIP
   ports:
   - port: 16686
     targetPort: 16686
     protocol: TCP
     name: query
-    nodePort: 30686
   - port: 4317
     targetPort: 4317
     protocol: TCP

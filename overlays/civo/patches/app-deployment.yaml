@@ -1,0 +1,6 @@
+- op: replace
+  path: /spec/template/spec/containers/0/image
+  value: ghcr.io/graz-dev/edge-demo-app:latest
+- op: replace
+  path: /spec/template/spec/containers/0/imagePullPolicy
+  value: IfNotPresent

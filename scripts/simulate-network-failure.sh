@@ -10,7 +10,14 @@ NC='\033[0m'
 echo -e "${YELLOW}🔌 Simulating Satellite Link Loss...${NC}"
 echo "=========================================="
 
-EDGE_NODE="k3d-edge-observability-agent-0"
+# Get the network-chaos pod (privileged, hostNetwork — iptables commands affect the node directly)
+CHAOS_POD=$(kubectl get pod -n observability -l app=network-chaos \
+  -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+
+if [ -z "$CHAOS_POD" ]; then
+  echo -e "${RED}❌ network-chaos pod not found. Is the demo running?${NC}"
+  exit 1
+fi
 
 # Get the OTel Collector pod IP (traffic blocking is per-source-IP so we only
 # affect the collector, not kubelet or Prometheus scraping from the hub)
@@ -27,17 +34,27 @@ echo "$POD_IP" > /tmp/otel-collector-pod-ip
 
 echo -e "\n${RED}⚠️  Blocking OTel Collector (${POD_IP}) → hub backends...${NC}"
 
-# Block FORWARD chain: OTel Collector → Jaeger OTLP (4317)
-docker exec "$EDGE_NODE" iptables -I FORWARD \
-  -s "$POD_IP" -p tcp --dport 4317 -j DROP
+# Helper: insert a DROP rule via BOTH iptables backends.
+# k3d/k3s may use iptables-nft OR iptables-legacy depending on host kernel.
+# Applying to both guarantees the rule is evaluated regardless of which
+# backend the kernel's netfilter uses for the FORWARD chain.
+_drop() {
+  local dport="$1"
+  kubectl exec -n observability "$CHAOS_POD" -- sh -c \
+    "iptables        -I FORWARD -s ${POD_IP} -p tcp --dport ${dport} -j DROP 2>/dev/null || true
+     iptables-legacy -I FORWARD -s ${POD_IP} -p tcp --dport ${dport} -j DROP 2>/dev/null || true"
+}
 
-# Block FORWARD chain: OTel Collector → Prometheus OTLP (9090)
-docker exec "$EDGE_NODE" iptables -I FORWARD \
-  -s "$POD_IP" -p tcp --dport 9090 -j DROP
+_drop 4317   # Jaeger OTLP gRPC
+_drop 9090   # Prometheus remote-write
+_drop 3100   # Loki push
 
-# Block FORWARD chain: OTel Collector → Loki (3100)
-docker exec "$EDGE_NODE" iptables -I FORWARD \
-  -s "$POD_IP" -p tcp --dport 3100 -j DROP
+# Flush conntrack entries for the collector so that already-ESTABLISHED gRPC
+# connections are not kept alive through the conntrack ESTABLISHED bypass.
+# Without this, in-flight long-lived connections survive the DROP rule.
+# Redirect stdout: conntrack -D prints each deleted entry, which is noisy.
+kubectl exec -n observability "$CHAOS_POD" -- \
+  conntrack -D -s "$POD_IP" >/dev/null 2>&1 || true
 
 echo -e "\n${GREEN}✓ Network failure simulated (NO pod restart — collector keeps running)${NC}"
 echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
