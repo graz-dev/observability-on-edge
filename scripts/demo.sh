@@ -428,16 +428,32 @@ Watch 'Trace Queue Depth' start rising."
     -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
   CHAOS_POD_ACT3=$(kubectl get pod -n "${NAMESPACE}" -l app=network-chaos \
     -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-  # The custom collector image may be distroless (no shell/ls).
-  # The network-chaos pod (netshoot) mounts the same hostPath — use it as fallback.
+
+  # On local (k3d): chaos pod mounts the same hostPath as the collector → can list files.
+  # On Civo: collector is distroless (no ls/find) and chaos pod mounts a hostPath that
+  # is separate from the PVC where the collector actually writes → show PVC usage instead.
   _show_file_storage() {
-    { [[ -n "$COLLECTOR_POD" ]] && \
-        kubectl exec -n "${NAMESPACE}" "$COLLECTOR_POD" -- \
-          ls -lah /var/lib/otelcol/file_storage/ 2>/dev/null; } || \
-    { [[ -n "$CHAOS_POD_ACT3" ]] && \
-        kubectl exec -n "${NAMESPACE}" "$CHAOS_POD_ACT3" -- \
-          ls -lah /var/lib/otelcol/file_storage/ 2>/dev/null; } || \
-    echo "    (file storage not readable)"
+    if [[ "$DEMO_ENV" == "local" ]]; then
+      { [[ -n "$COLLECTOR_POD" ]] && \
+          kubectl exec -n "${NAMESPACE}" "$COLLECTOR_POD" -- \
+            ls -lah /var/lib/otelcol/file_storage/ 2>/dev/null; } || \
+      { [[ -n "$CHAOS_POD_ACT3" ]] && \
+          kubectl exec -n "${NAMESPACE}" "$CHAOS_POD_ACT3" -- \
+            ls -lah /var/lib/otelcol/file_storage/ 2>/dev/null; } || \
+      echo "    (file storage not readable)"
+    else
+      # Civo: collector writes to PVC (civo-volume block storage).
+      # The collector image is distroless — no shell to exec into.
+      # Show PVC capacity and the collector's accepted-vs-exported span delta instead.
+      local pvc_capacity accepted exported queued
+      pvc_capacity=$(kubectl get pvc otelcol-file-storage -n "${NAMESPACE}" \
+        -o jsonpath='{.status.capacity.storage}' 2>/dev/null || echo "?")
+      accepted=$(prom_value 'sum(increase(otelcol_receiver_accepted_spans[2m]))')
+      exported=$(prom_value 'sum(increase(otelcol_exporter_sent_spans[2m]))')
+      queued=$(python3 -c "print(int(max(0, float('${accepted}') - float('${exported}'))))" 2>/dev/null || echo "?")
+      echo "    PVC otelcol-file-storage (${pvc_capacity}) — writing bbolt files"
+      echo "    ~${queued} spans accumulated in queue since link went down"
+    fi
   }
   _show_file_storage | sed 's/^/    /'
 

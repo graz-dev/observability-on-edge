@@ -72,7 +72,7 @@ data:
           insecure: true
         sending_queue:
           enabled: true
-          num_consumers: 4
+          num_consumers: 1
           queue_size: 1000
           storage: file_storage
         retry_on_failure:
@@ -107,7 +107,7 @@ data:
           insecure: true
         sending_queue:
           enabled: true
-          num_consumers: 4
+          num_consumers: 1
           queue_size: 1000
           storage: file_storage
         retry_on_failure:
