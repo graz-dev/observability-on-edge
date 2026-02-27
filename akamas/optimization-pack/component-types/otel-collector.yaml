@@ -1,2 +1,131 @@
 name: OtelCollector
 description: OpenTelemetry Collector edge node — tunes pipeline processors and Go runtime
+
+parameters:
+  # ── Batch processor ────────────────────────────────────────────────────────
+  # How long the processor accumulates spans/logs/metrics before flushing.
+  # Larger → fewer flushes, higher in-flight memory; smaller → more CPU overhead.
+  - name: batch_timeout_s
+    unit: seconds
+    domain:
+      type: integer
+      domain: [1, 10]
+    defaultValue: 5
+    operators:
+      FileConfigurator: 
+
+  # Target number of items per batch. Larger → fewer network round-trips but
+  # more heap per batch; smaller → lower per-batch memory at higher call rate.
+  - name: batch_send_size
+    unit: ""
+    restart: true
+    domain:
+      type: integer
+      domanin: [128, 2048]
+    defaultValue: 512
+    operators:
+      FileConfigurator: 
+
+  # ── Tail-based sampling ─────────────────────────────────────────────────────
+  # Window during which all spans of a trace are held in memory awaiting a
+  # decision.  This is the single biggest memory driver: high decision_wait ×
+  # high expected_new_traces_per_sec → large in-memory trace buffer.
+  - name: tail_decision_wait_s
+    unit: seconds
+    restart: true
+    domain:
+      type: integer
+      domain: [2, 10]
+    defaultValue: 5
+    operators:
+      FileConfigurator:     
+
+  # Upper bound on concurrent in-flight traces held in the sampler's LRU map.
+  # Evicted entries are decided immediately as "sampled", so too-small values
+  # increase false positives; too-large values waste RSS.
+  - name: tail_num_traces
+    unit: ""
+    restart: true
+    domain:
+      type: integer
+      domain: [1000, 20000]
+    defaultValue: 10000
+    operators:
+      FileConfigurator: 
+
+  # ── Memory limiter ──────────────────────────────────────────────────────────
+  # Soft cap on process RSS.  When exceeded, the limiter starts refusing new
+  # data (back-pressure); when spike headroom is used up, it hard-refuses.
+  # Must be well below the K8s memory limit (512 Mi).
+  - name: memory_limit_mib
+    unit: megabytes
+    restart: true
+    domain:
+      type: integer
+      domain: [128, 450]
+    defaultValue: 400
+    operators:
+      FileConfigurator: 
+
+  - name: memory_spike_mib
+    unit: megabytes
+    restart: true
+    domain:
+      type: integer
+      domain: [20, 80]
+    defaultValue: 80
+    operators:
+      FileConfigurator: 
+
+  # ── Go runtime ─────────────────────────────────────────────────────────────
+  # GOGC: GC target percentage.  Lower → GC runs more often → lower heap
+  # ceiling → more CPU; higher → larger heap before GC → less CPU but more RSS.
+  - name: gogc
+    unit: percent
+    restart: true
+    domain:
+      type: integer
+      domain: [50, 200]
+    defaultValue: 80
+    operators:
+      FileConfigurator: 
+
+  # GOMEMLIMIT: soft memory ceiling for the Go heap (MiB).  When RSS approaches
+  # this value the runtime ignores GOGC and collects aggressively.  Effective
+  # floor on RSS — set below memory_limit_mib.
+  - name: gomemlimit_mib
+    unit: megabytes
+    restart: true
+    domain:
+      type: integer
+      domain: [100, 380]
+    defaultValue: 300
+    operators:
+      FileConfigurator: 
+
+  # GOMAXPROCS: number of OS threads the scheduler can use in parallel.
+  # Fewer threads → less CPU contention and context switching; too few → risk
+  # of goroutine starvation on the gRPC/HTTP listener paths.
+  - name: gomaxprocs
+    unit: ""
+    restart: true
+    domain:
+      type: integer
+      domain: [1, 4]
+    defaultValue: 2
+    operators:
+      FileConfigurator: 
+
+metrics:
+  - name: working_set_bytes
+  - name: memory_rss_bytes
+  - name: cpu_millicores
+  - name: dropped_spans
+  - name: dropped_logs
+  - name: dropped_metric_points
+  - name: refused_spans
+  - name: refused_log_records
+  - name: refused_metric_points
+  - name: heap_alloc_bytes
+  - name: exported_spans_rate
+  - name: accepted_spans_rate
