@@ -17,28 +17,28 @@ config:
   logLevel: DETAILED
 
 metrics:
-  - name: working_set_bytes
+  - metric: working_set_bytes
     datasourceMetric: 'container_memory_working_set_bytes{pod=~"otel-collector.*", container="otel-collector", namespace="observability"}'
-  - name: memory_rss_bytes
+  - metric: memory_rss_bytes
     datasourceMetric: 'otelcol_process_memory_rss{job=~"$JOB$" %FILTERS%}'
-  - name: cpu_millicores
+  - metric: cpu_millicores
     datasourceMetric: 'rate(container_cpu_usage_seconds_total{pod=~"otel-collector.*", container="otel-collector", namespace="observability"}[$DURATION$]) * 1000'
-  - name: dropped_spans
+  - metric: dropped_spans
     datasourceMetric: 'increase(otelcol_processor_dropped_spans{job=~"$JOB$" %FILTERS%}[$DURATION$])'
-  - name: dropped_logs
+  - metric: dropped_logs
     datasourceMetric: 'increase(otelcol_processor_dropped_log_records{job=~"$JOB$" %FILTERS%}[$DURATION$])'
-  - name: dropped_metric_points
+  - metric: dropped_metric_points
     datasourceMetric: 'increase(otelcol_processor_dropped_metric_points{job=~"$JOB$" %FILTERS%}[$DURATION$])'
-  - name: refused_spans
+  - metric: refused_spans
     datasourceMetric: 'increase(otelcol_receiver_refused_spans{job=~"$JOB$" %FILTERS%}[$DURATION$])'
-  - name: refused_log_records
+  - metric: refused_log_records
     datasourceMetric: 'increase(otelcol_receiver_refused_log_records{job=~"$JOB$" %FILTERS%}[$DURATION$])'
-  - name: refused_metric_points
+  - metric: refused_metric_points
     datasourceMetric: 'increase(otelcol_receiver_refused_metric_points{job=~"$JOB$" %FILTERS%}[$DURATION$])'
-  - name: heap_alloc_bytes
+  - metric: heap_alloc_bytes
     datasourceMetric: 'otelcol_process_runtime_heap_alloc_bytes{job=~"$JOB$" %FILTERS%}'
-  - name: exported_spans_rate
+  - metric: exported_spans_rate
     datasourceMetric: 'rate(otelcol_exporter_sent_spans{job=~"$JOB$" %FILTERS%}[$DURATION$])'
-  - name: accepted_spans_rate
+  - metric: accepted_spans_rate
     datasourceMetric: 'rate(otelcol_receiver_accepted_spans{job=~"$JOB$" %FILTERS%}[$DURATION$])'
 
