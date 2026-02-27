@@ -16,7 +16,6 @@ parameters:
   # Target number of items per batch. Larger → fewer network round-trips but
   # more heap per batch; smaller → lower per-batch memory at higher call rate.
   - name: batch_send_size
-    restart: true
     domain:
       type: integer
       domanin: [128, 2048]
@@ -29,7 +28,6 @@ parameters:
   # decision.  This is the single biggest memory driver: high decision_wait ×
   # high expected_new_traces_per_sec → large in-memory trace buffer.
   - name: tail_decision_wait_s
-    restart: true
     domain:
       type: integer
       domain: [2, 10]
@@ -41,7 +39,6 @@ parameters:
   # Evicted entries are decided immediately as "sampled", so too-small values
   # increase false positives; too-large values waste RSS.
   - name: tail_num_traces
-    restart: true
     domain:
       type: integer
       domain: [1000, 20000]
@@ -54,7 +51,6 @@ parameters:
   # data (back-pressure); when spike headroom is used up, it hard-refuses.
   # Must be well below the K8s memory limit (512 Mi).
   - name: memory_limit_mib
-    restart: true
     domain:
       type: integer
       domain: [128, 450]
@@ -63,7 +59,6 @@ parameters:
       FileConfigurator: 
 
   - name: memory_spike_mib
-    restart: true
     domain:
       type: integer
       domain: [20, 80]
@@ -75,7 +70,6 @@ parameters:
   # GOGC: GC target percentage.  Lower → GC runs more often → lower heap
   # ceiling → more CPU; higher → larger heap before GC → less CPU but more RSS.
   - name: gogc
-    restart: true
     domain:
       type: integer
       domain: [50, 200]
@@ -87,7 +81,6 @@ parameters:
   # this value the runtime ignores GOGC and collects aggressively.  Effective
   # floor on RSS — set below memory_limit_mib.
   - name: gomemlimit_mib
-    restart: true
     domain:
       type: integer
       domain: [100, 380]
@@ -99,7 +92,6 @@ parameters:
   # Fewer threads → less CPU contention and context switching; too few → risk
   # of goroutine starvation on the gRPC/HTTP listener paths.
   - name: gomaxprocs
-    restart: true
     domain:
       type: integer
       domain: [1, 4]
