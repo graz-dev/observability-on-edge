@@ -25,7 +25,7 @@ metrics:
   # the configured telemetry duration, currently 600s = 10 min steady-state).
   - name: cpu_millicores
     description: Collector CPU usage (millicores) — rate over full measurement window
-    unit: ""
+    unit: millicores
     #datasourceMetric: 'rate(container_cpu_usage_seconds_total{pod=~"otel-collector.*", container="otel-collector", namespace="observability"}[$DURATION$]) * 1000'
 
   # ── SLO / safety metrics (KPIs — must not be violated) ─────────────────────
@@ -35,19 +35,19 @@ metrics:
   # $DURATION$ ensures we measure the full steady-state window, not a fixed slice.
   - name: dropped_spans
     description: Spans dropped by processors (increase over measurement window)
-    unit: ""
+    unit: span
     #datasourceMetric: 'increase(otelcol_processor_dropped_spans{job=~"$JOB$" %FILTERS%}[$DURATION$])'
 
   # Log records dropped by processors.
   - name: dropped_logs
     description: Log records dropped by processors (increase over measurement window)
-    unit: ""
+    unit: logs
     #datasourceMetric: 'increase(otelcol_processor_dropped_log_records{job=~"$JOB$" %FILTERS%}[$DURATION$])'
 
   # Metric data-points dropped by processors.
   - name: dropped_metric_points
     description: Metric data-points dropped by processors (increase over measurement window)
-    unit: ""
+    unit: points
     #datasourceMetric: 'increase(otelcol_processor_dropped_metric_points{job=~"$JOB$" %FILTERS%}[$DURATION$])'
 
   # Spans refused at the RECEIVER level by the memory_limiter back-pressure.
@@ -57,17 +57,17 @@ metrics:
   # would appear safe (0 processor drops) while actually losing data at ingestion.
   - name: refused_spans
     description: Spans refused at receiver (memory_limiter back-pressure)
-    unit: ""
+    unit: spans
     #datasourceMetric: 'increase(otelcol_receiver_refused_spans{job=~"$JOB$" %FILTERS%}[$DURATION$])'
 
   - name: refused_log_records
     description: Log records refused at receiver (memory_limiter back-pressure)
-    unit: ""
+    unit: records
     #datasourceMetric: 'increase(otelcol_receiver_refused_log_records{job=~"$JOB$" %FILTERS%}[$DURATION$])'
 
   - name: refused_metric_points
     description: Metric data-points refused at receiver (memory_limiter back-pressure)
-    unit: ""
+    unit: points
     #datasourceMetric: 'increase(otelcol_receiver_refused_metric_points{job=~"$JOB$" %FILTERS%}[$DURATION$])'
 
   # ── Diagnostic / informational (collected but not in the goal) ─────────────
@@ -82,12 +82,12 @@ metrics:
   # Rate over the full measurement window for consistency with the CPU metric.
   - name: exported_spans_rate
     description: Spans successfully exported (rate/s over measurement window)
-    unit: ""
+    unit: percent
     #datasourceMetric: 'rate(otelcol_exporter_sent_spans{job=~"$JOB$" %FILTERS%}[$DURATION$])'
 
   # Accepted throughput at receiver — should be stable across experiments.
   # A significant drop signals the collector is rejecting load, not optimising it.
   - name: accepted_spans_rate
     description: Spans accepted by receiver (rate/s over measurement window)
-    unit: ""
+    unit: percent
     #datasourceMetric: 'rate(otelcol_receiver_accepted_spans{job=~"$JOB$" %FILTERS%}[$DURATION$])'

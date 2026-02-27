@@ -17,7 +17,7 @@ parameters:
   # Target number of items per batch. Larger → fewer network round-trips but
   # more heap per batch; smaller → lower per-batch memory at higher call rate.
   - name: batch_send_size
-    unit: ""
+    unit: kilobytes
     restart: true
     domain:
       type: integer
@@ -44,7 +44,7 @@ parameters:
   # Evicted entries are decided immediately as "sampled", so too-small values
   # increase false positives; too-large values waste RSS.
   - name: tail_num_traces
-    unit: ""
+    unit: integer
     restart: true
     domain:
       type: integer
@@ -107,7 +107,7 @@ parameters:
   # Fewer threads → less CPU contention and context switching; too few → risk
   # of goroutine starvation on the gRPC/HTTP listener paths.
   - name: gomaxprocs
-    unit: ""
+    unit: procs
     restart: true
     domain:
       type: integer
