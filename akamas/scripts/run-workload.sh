@@ -1,10 +1,12 @@
 #!/bin/bash
 # run-workload.sh — called by Akamas after apply-config.sh.
-# Creates a short (6-min) k6 TestRun in the Civo cluster and waits for it to
-# finish.  Akamas then queries Prometheus over the 5-min steady-state window.
+# Creates a k6 TestRun in the Civo cluster and waits for it to finish.
+# Akamas then queries Prometheus over the steady-state measurement window.
 #
-# Runs inside the akamas-runner pod with in-cluster kubectl.
-export KUBECONFIG=/work/kubeconfig
+# Runs on the Akamas toolbox with the Civo kubeconfig available.
+# KUBECONFIG is inherited from the Akamas environment; fall back to
+# /work/kubeconfig if not already set.
+export KUBECONFIG="${KUBECONFIG:-/work/kubeconfig}"
 
 set -euo pipefail
 

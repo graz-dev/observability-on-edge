@@ -1,7 +1,7 @@
 kind: study
 system: edgeobservabilitystack
 workflow: collector-footprint-workflow
-name: collector-footprint-pareto
+name: collector-footprint
 description: >
   Minimise OTel Collector working-set memory and CPU on the Civo edge node.
   Objective: weighted composite (60 % memory + 40 % CPU) — normalised so

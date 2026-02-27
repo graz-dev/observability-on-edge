@@ -1,11 +1,13 @@
 #!/bin/bash
-# apply-config.sh — called by Akamas Executor for every experiment.
-# Receives parameters as env vars (set by the workflow command prefix):
+# apply-config.sh — called by Akamas for every experiment (via template/final.sh).
+# Receives parameters as exported env vars set by template.sh:
 #   BATCH_TIMEOUT_S, BATCH_SEND_SIZE, TAIL_DECISION_WAIT_S, TAIL_NUM_TRACES,
 #   MEMORY_LIMIT_MIB, MEMORY_SPIKE_MIB, GOGC, GOMEMLIMIT_MIB, GOMAXPROCS
 #
-# Runs inside the akamas-runner pod (Civo cluster) with in-cluster kubectl.
-export KUBECONFIG=/work/kubeconfig
+# Runs on the Akamas toolbox with the Civo kubeconfig available.
+# KUBECONFIG is inherited from the Akamas environment; fall back to
+# /work/kubeconfig if not already set.
+export KUBECONFIG="${KUBECONFIG:-/work/kubeconfig}"
 
 set -euo pipefail
 
