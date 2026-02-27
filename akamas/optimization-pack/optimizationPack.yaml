@@ -4,4 +4,4 @@ description: Optimization pack for the OpenTelemetry Collector running on edge n
   to minimize memory RSS and CPU usage while preserving zero-drop guarantees.
 version: 0.1.0
 tags: [OpenTelemetry, Collector, Edge, Go, Observability]
-
+weight: 1
