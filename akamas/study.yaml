@@ -12,7 +12,7 @@ goal:
   name: minimize_footprint
   objective: minimize
   function:
-    formula: ((0.6 * (mem / 100000000)) + (0.4 * (cpu / 80)))
+    formula: ((1 * (collector.working_set_bytes / 1024 / 1024 / 1024)) + (8 * (collector.cpu_millicores / 1000)))
 #  constraints:
 #    absolute: 
 #      - name: no_dropped_spans
