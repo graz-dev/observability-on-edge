@@ -1,0 +1,44 @@
+kind: telemetry
+system: edgeobservabilitystack
+name: Prometheus
+provider: Prometheus
+config:
+  # IP assigned by Civo LoadBalancer to the prometheus service.
+  # After `kubectl apply -k overlays/civo` run:
+  #   kubectl get svc prometheus -n observability -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+  # and replace the placeholder below.
+  address: "74.220.19.53"
+  port: 9090
+
+  # Scrape window passed as $DURATION$ in PromQL — must match the workload
+  # steady-state duration in run-workload.sh (600 s = 10 min).
+  duration: 30
+
+  logLevel: DETAILED
+
+metrics:
+  - name: working_set_bytes
+    datasourceMetric: 'container_memory_working_set_bytes{pod=~"otel-collector.*", container="otel-collector", namespace="observability"}'
+  - name: memory_rss_bytes
+    datasourceMetric: 'otelcol_process_memory_rss{job=~"$JOB$" %FILTERS%}'
+  - name: cpu_millicores
+    datasourceMetric: 'rate(container_cpu_usage_seconds_total{pod=~"otel-collector.*", container="otel-collector", namespace="observability"}[$DURATION$]) * 1000'
+  - name: dropped_spans
+    datasourceMetric: 'increase(otelcol_processor_dropped_spans{job=~"$JOB$" %FILTERS%}[$DURATION$])'
+  - name: dropped_logs
+    datasourceMetric: 'increase(otelcol_processor_dropped_log_records{job=~"$JOB$" %FILTERS%}[$DURATION$])'
+  - name: dropped_metric_points
+    datasourceMetric: 'increase(otelcol_processor_dropped_metric_points{job=~"$JOB$" %FILTERS%}[$DURATION$])'
+  - name: refused_spans
+    datasourceMetric: 'increase(otelcol_receiver_refused_spans{job=~"$JOB$" %FILTERS%}[$DURATION$])'
+  - name: refused_log_records
+    datasourceMetric: 'increase(otelcol_receiver_refused_log_records{job=~"$JOB$" %FILTERS%}[$DURATION$])'
+  - name: refused_metric_points
+    datasourceMetric: 'increase(otelcol_receiver_refused_metric_points{job=~"$JOB$" %FILTERS%}[$DURATION$])'
+  - name: heap_alloc_bytes
+    datasourceMetric: 'otelcol_process_runtime_heap_alloc_bytes{job=~"$JOB$" %FILTERS%}'
+  - name: exported_spans_rate
+    datasourceMetric: 'rate(otelcol_exporter_sent_spans{job=~"$JOB$" %FILTERS%}[$DURATION$])'
+  - name: accepted_spans_rate
+    datasourceMetric: 'rate(otelcol_receiver_accepted_spans{job=~"$JOB$" %FILTERS%}[$DURATION$])'
+

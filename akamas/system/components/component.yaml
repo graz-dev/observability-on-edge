@@ -1,3 +1,5 @@
+kind: component
+system: edgeobservabilitystack
 name: collector
 description: OTel Collector DaemonSet pod on the edge node (node-role=edge)
 componentType: OtelCollector
