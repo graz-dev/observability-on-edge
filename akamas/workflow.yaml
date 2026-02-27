@@ -1,0 +1,59 @@
+name: collector-footprint-workflow
+tasks:
+  # ── Step 1: apply new collector config and restart ─────────────────────────
+  # The Executor SSHes into the akamas-runner pod (inside the Civo cluster)
+  # and runs apply-config.sh with the parameter values substituted by Akamas
+  # via replaceTemplate. All parameters arrive as env-var assignments prefixed
+  # to the bash invocation so the script can read them via $VAR.
+  - name: apply-collector-config
+    operator: Executor
+    critical: true
+    arguments:
+      host:
+        # IP assigned by the Civo LoadBalancer to the akamas-runner Service.
+        # Replace after deploying akamas/k8s/runner*.yaml:
+        #   kubectl get svc akamas-runner -n observability \
+        #     -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+        hostname: "<RUNNER_LB_IP>"
+        username: akamas
+        # Path to the private key stored on the Akamas server.
+        # Generate with: ssh-keygen -t ed25519 -f akamas-runner-key
+        # and put the public key in the akamas-runner-pubkey Secret (see k8s/).
+        key: /opt/akamas/keys/akamas-runner-key
+        sshPort: 22
+      replaceTemplate: true
+      timeout: 180s
+      retries: 2
+      retry_delay: 10s
+      # Akamas substitutes ${collector.*} with the candidate values before SSH.
+      # batch_send_max_size is computed as 2 × batch_send_size inside the script.
+      command: >-
+        env
+        BATCH_TIMEOUT_S="${collector.batch_timeout_s}"
+        BATCH_SEND_SIZE="${collector.batch_send_size}"
+        TAIL_DECISION_WAIT_S="${collector.tail_decision_wait_s}"
+        TAIL_NUM_TRACES="${collector.tail_num_traces}"
+        MEMORY_LIMIT_MIB="${collector.memory_limit_mib}"
+        MEMORY_SPIKE_MIB="${collector.memory_spike_mib}"
+        GOGC="${collector.gogc}"
+        GOMEMLIMIT_MIB="${collector.gomemlimit_mib}"
+        GOMAXPROCS="${collector.gomaxprocs}"
+        bash /opt/scripts/apply-config.sh
+
+  # ── Step 2: run the optimisation workload (shortened k6 test) ──────────────
+  # Runs a 6-minute k6 test (30s ramp-up + 5 min steady + 30s ramp-down)
+  # and blocks until the TestRun is complete. Akamas then queries Prometheus
+  # over the 5-minute steady-state window to compute the objective.
+  - name: run-workload
+    operator: Executor
+    critical: true
+    collectMetricsOnFailure: false
+    arguments:
+      host:
+        hostname: "<RUNNER_LB_IP>"
+        username: akamas
+        key: /opt/akamas/keys/akamas-runner-key
+        sshPort: 22
+      timeout: 900s
+      retries: 1
+      command: bash /opt/scripts/run-workload.sh

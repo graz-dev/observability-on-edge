@@ -1,0 +1,145 @@
+# Akamas runner — a persistent pod inside the Civo cluster that the Akamas
+# Executor SSHes into to run apply-config.sh and run-workload.sh.
+#
+# Image: alpine/k8s (has kubectl) + openssh-server installed at startup.
+# Auth:  ed25519 key — public half stored in the akamas-runner-pubkey Secret,
+#        private half kept on the Akamas EKS server at:
+#          /opt/akamas/keys/akamas-runner-key
+#
+# Setup (one-time):
+#   ssh-keygen -t ed25519 -f akamas-runner-key -N ""
+#   kubectl create secret generic akamas-runner-pubkey \
+#     -n observability \
+#     --from-file=authorized_keys=akamas-runner-key.pub
+#   # Copy private key to the Akamas EKS pod — method depends on your setup.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: akamas-runner
+  namespace: observability
+  labels:
+    app: akamas-runner
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: akamas-runner
+  template:
+    metadata:
+      labels:
+        app: akamas-runner
+    spec:
+      serviceAccountName: akamas-runner
+      nodeSelector:
+        node-role: hub
+      containers:
+        - name: runner
+          # alpine/k8s ships with kubectl, bash, curl, jq.
+          # We add openssh at container start via the command below.
+          image: alpine/k8s:1.29.2
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              # Install OpenSSH server
+              apk add --no-cache openssh-server
+
+              # Create the akamas user
+              adduser -D -s /bin/bash akamas
+              # adduser -D locks the account with '!' in /etc/shadow.
+              # OpenSSH with UsePAM no refuses locked accounts even for pubkey auth.
+              # passwd -d removes the lock (sets an empty/disabled password).
+              passwd -d akamas
+
+              # Inject the authorised public key from the Secret
+              mkdir -p /home/akamas/.ssh
+              cp /opt/ssh-keys/authorized_keys /home/akamas/.ssh/authorized_keys
+              chown -R akamas:akamas /home/akamas/.ssh
+              chmod 700 /home/akamas/.ssh
+              chmod 600 /home/akamas/.ssh/authorized_keys
+
+              # Build a kubeconfig that uses the pod's ServiceAccount token.
+              # SSH sessions don't inherit KUBERNETES_SERVICE_HOST/PORT from the
+              # container env, so kubectl falls back to localhost:8080 without this.
+              mkdir -p /home/akamas/.kube
+              kubectl config set-cluster in-cluster \
+                --server=https://kubernetes.default.svc:443 \
+                --certificate-authority=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt \
+                --kubeconfig=/home/akamas/.kube/config
+              kubectl config set-credentials akamas-runner \
+                --token="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" \
+                --kubeconfig=/home/akamas/.kube/config
+              kubectl config set-context in-cluster \
+                --cluster=in-cluster \
+                --user=akamas-runner \
+                --namespace=observability \
+                --kubeconfig=/home/akamas/.kube/config
+              kubectl config use-context in-cluster \
+                --kubeconfig=/home/akamas/.kube/config
+              chown -R akamas:akamas /home/akamas/.kube
+              chmod 600 /home/akamas/.kube/config
+
+              # Generate host keys if missing
+              ssh-keygen -A
+
+              # sshd config: allow pubkey auth only, no passwords.
+              # Note: UsePAM is omitted — Alpine OpenSSH is compiled without PAM.
+              cat > /etc/ssh/sshd_config << 'SSHD_CONF'
+              Port 22
+              PermitRootLogin no
+              PasswordAuthentication no
+              PubkeyAuthentication yes
+              AuthorizedKeysFile .ssh/authorized_keys
+              ChallengeResponseAuthentication no
+              SSHD_CONF
+
+              # Copy scripts from ConfigMap to a writable directory
+              cp /opt/scripts-ro/*.sh /opt/scripts/
+              chmod +x /opt/scripts/*.sh
+
+              echo "[runner] sshd starting..."
+              exec /usr/sbin/sshd -D -e
+          ports:
+            - containerPort: 22
+              name: ssh
+          volumeMounts:
+            - name: ssh-pubkey
+              mountPath: /opt/ssh-keys
+              readOnly: true
+            - name: scripts-ro
+              mountPath: /opt/scripts-ro
+              readOnly: true
+            - name: scripts-rw
+              mountPath: /opt/scripts
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+      volumes:
+        - name: ssh-pubkey
+          secret:
+            secretName: akamas-runner-pubkey
+        - name: scripts-ro
+          configMap:
+            name: akamas-runner-scripts
+        - name: scripts-rw
+          emptyDir: {}
+---
+# Expose the runner via LoadBalancer so the Akamas EKS server can reach it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: akamas-runner
+  namespace: observability
+spec:
+  type: LoadBalancer
+  selector:
+    app: akamas-runner
+  ports:
+    - port: 22
+      targetPort: 22
+      name: ssh

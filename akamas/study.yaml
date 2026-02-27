@@ -1,0 +1,184 @@
+system: edge-observability-stack
+workflow: collector-footprint-workflow
+name: collector-footprint-pareto
+description: >
+  Minimise OTel Collector working-set memory and CPU on the Civo edge node.
+  Objective: weighted composite (60 % memory + 40 % CPU) — normalised so
+  both signals contribute proportionally regardless of unit difference.
+  SLO constraints: zero dropped OR refused spans / logs / metrics at all times.
+
+# ── Goal ────────────────────────────────────────────────────────────────────
+# Akamas minimises the weighted composite of normalised memory and CPU.
+#
+# Memory: container_memory_working_set_bytes (cAdvisor) — what kubectl top and
+# the K8s OOM killer use. More accurate than otelcol_process_memory_rss for
+# Go processes because Go 1.12+ releases pages with MADV_FREE, causing RSS to
+# stay inflated after GC until the OS reclaims them under pressure.
+#
+# Baseline values (measured before the study) are used for normalisation.
+# Run the baseline step first, then check Grafana and update the divisors:
+#   baseline working_set ≈ 100 MB  → divisor 100_000_000
+#   baseline cpu         ≈ 80 m    → divisor 80
+goal:
+  objective: minimize
+  function:
+    formula: "0.6 * (mem / 100000000) + 0.4 * (cpu / 80)"
+    variables:
+      mem:
+        metric: collector.working_set_bytes
+        labels:
+          componentName: collector
+      cpu:
+        metric: collector.cpu_millicores
+        labels:
+          componentName: collector
+
+# ── SLO / Safety KPIs ───────────────────────────────────────────────────────
+# If any KPI is violated the experiment is marked unsafe and Akamas will avoid
+# that region of the parameter space.
+#
+# Two distinct failure modes are covered:
+#  1. processor-level drops  — memory_limiter, batch, tail-sampler evict data
+#                              already inside the pipeline
+#  2. receiver-level refusals — memory_limiter back-pressure rejects new data
+#                               before it enters the pipeline at all
+#     (a config with limit_mib too low shows 0 drops but high refusals)
+kpis:
+  - name: no_dropped_spans
+    description: Zero spans dropped by processors during the workload window
+    function:
+      formula: dropped_spans
+      variables:
+        dropped_spans:
+          metric: collector.dropped_spans
+          labels:
+            componentName: collector
+    objective: lowerBound
+    value: 0
+
+  - name: no_dropped_logs
+    description: Zero log records dropped by processors during the workload window
+    function:
+      formula: dropped_logs
+      variables:
+        dropped_logs:
+          metric: collector.dropped_logs
+          labels:
+            componentName: collector
+    objective: lowerBound
+    value: 0
+
+  - name: no_dropped_metric_points
+    description: Zero metric data-points dropped by processors during the workload window
+    function:
+      formula: dropped_metric_points
+      variables:
+        dropped_metric_points:
+          metric: collector.dropped_metric_points
+          labels:
+            componentName: collector
+    objective: lowerBound
+    value: 0
+
+  - name: no_refused_spans
+    description: Zero spans refused at receiver (memory_limiter back-pressure)
+    function:
+      formula: refused_spans
+      variables:
+        refused_spans:
+          metric: collector.refused_spans
+          labels:
+            componentName: collector
+    objective: lowerBound
+    value: 0
+
+  - name: no_refused_log_records
+    description: Zero log records refused at receiver (memory_limiter back-pressure)
+    function:
+      formula: refused_log_records
+      variables:
+        refused_log_records:
+          metric: collector.refused_log_records
+          labels:
+            componentName: collector
+    objective: lowerBound
+    value: 0
+
+  - name: no_refused_metric_points
+    description: Zero metric data-points refused at receiver (memory_limiter back-pressure)
+    function:
+      formula: refused_metric_points
+      variables:
+        refused_metric_points:
+          metric: collector.refused_metric_points
+          labels:
+            componentName: collector
+    objective: lowerBound
+    value: 0
+
+# ── Metrics collected every experiment ──────────────────────────────────────
+metricsSelection:
+  # Objective metrics
+  - collector.working_set_bytes
+  - collector.cpu_millicores
+  # Processor-level drops (KPIs)
+  - collector.dropped_spans
+  - collector.dropped_logs
+  - collector.dropped_metric_points
+  # Receiver-level refusals (KPIs)
+  - collector.refused_spans
+  - collector.refused_log_records
+  - collector.refused_metric_points
+  # Diagnostics
+  - collector.memory_rss_bytes
+  - collector.heap_alloc_bytes
+  - collector.exported_spans_rate
+  - collector.accepted_spans_rate
+
+# ── Parameters tuned by the optimiser ───────────────────────────────────────
+parametersSelection:
+  - name: collector.batch_timeout_s
+  - name: collector.batch_send_size
+  - name: collector.tail_decision_wait_s
+  - name: collector.tail_num_traces
+  - name: collector.memory_limit_mib
+  - name: collector.memory_spike_mib
+  - name: collector.gogc
+  - name: collector.gomemlimit_mib
+  - name: collector.gomaxprocs
+
+# ── Experiment settings ──────────────────────────────────────────────────────
+# Each experiment = 1 trial (1 workload run); aggregate over AVG.
+numberOfTrials: 1
+trialAggregation: AVG
+
+# ── Study steps ─────────────────────────────────────────────────────────────
+steps:
+  # Baseline: current production values — establishes the reference point.
+  - name: baseline
+    type: baseline
+    values:
+      collector.batch_timeout_s: 5
+      collector.batch_send_size: 512
+      collector.tail_decision_wait_s: 5
+      collector.tail_num_traces: 10000
+      collector.memory_limit_mib: 400
+      collector.memory_spike_mib: 80
+      collector.gogc: 80
+      collector.gomemlimit_mib: 300
+      collector.gomaxprocs: 2
+
+  # Optimisation: Bayesian search over the parameter space.
+  # 60 experiments → ~14 h total (≈ 14 min/experiment: ~90s restart + 12.5 min test).
+  # Increase numberOfExperiments for a more thorough search.
+  - name: optimise
+    type: optimize
+    numberOfExperiments: 60
+    maxFailedExperiments: 15
+    optimizer: SOBOL
+    optimizerOptions:
+      onlineMode: RECOMMEND        # pause and show recommendation before applying
+      safetyMode: GLOBAL           # avoid globally unsafe parameter regions
+      safetyFactor: 0.55
+      explorationFactor: 0.05      # low → exploit known-good regions faster
+      workloadOptimizedForStrategy: MAXIMIN

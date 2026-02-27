@@ -12,11 +12,13 @@ NC='\033[0m' # No Color
 DEMO_ENV="local"
 CIVO_REGION="LON1"
 CIVO_SIZE="g4s.kube.large"   # 4 vCPU / 8 GB — comfortable for live demo
+SETUP_AKAMAS=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --env)    DEMO_ENV="$2";    shift 2;;
     --region) CIVO_REGION="$2"; shift 2;;
     --size)   CIVO_SIZE="$2";   shift 2;;
+    --akamas) SETUP_AKAMAS=true; shift;;
     *) shift;;
   esac
 done
@@ -307,10 +309,122 @@ else
     echo "  - Jaeger:      (LB IP pending — kubectl get svc jaeger -n observability)"
   fi
   echo ""
-  echo "  To access Prometheus (port-forward required):"
-  echo "    kubectl port-forward -n observability svc/prometheus 9090:9090"
-  echo "    Then open: http://localhost:9090"
   echo ""
+
+  # ── Optional: Akamas optimisation runner ────────────────────────────────
+  if [[ "$SETUP_AKAMAS" == "true" ]]; then
+    echo -e "\n${YELLOW}🔬 Setting up Akamas optimisation runner...${NC}"
+
+    # Expose Prometheus as LoadBalancer so the Akamas server (EKS) can scrape it.
+    # Applied here and not in the base Civo overlay to avoid a public endpoint
+    # during normal demo runs.
+    echo -e "\n${YELLOW}📡 Exposing Prometheus via LoadBalancer (Akamas telemetry)...${NC}"
+    kubectl apply -f overlays/civo/patches/prometheus-lb.yaml
+    echo -e "${GREEN}✓ Prometheus LoadBalancer service applied${NC}"
+
+    # Generate SSH key pair if not already present
+    KEY_FILE="akamas-runner-key"
+    if [[ ! -f "$KEY_FILE" ]]; then
+      ssh-keygen -t ed25519 -f "$KEY_FILE" -N "" -C "akamas-runner"
+      echo -e "${GREEN}✓ SSH key pair generated: ${KEY_FILE} / ${KEY_FILE}.pub${NC}"
+    else
+      echo -e "${YELLOW}⚠️  Using existing SSH key: ${KEY_FILE}${NC}"
+    fi
+
+    # Create / update the SSH public-key Secret in the cluster
+    kubectl create secret generic akamas-runner-pubkey \
+      -n observability \
+      --from-file=authorized_keys="${KEY_FILE}.pub" \
+      --dry-run=client -o yaml | kubectl apply -f -
+    echo -e "${GREEN}✓ SSH public key stored in Secret 'akamas-runner-pubkey'${NC}"
+
+    # Deploy runner RBAC, Deployment, Service, and ConfigMaps
+    kubectl apply -f akamas/k8s/runner-rbac.yaml
+    kubectl apply -f akamas/k8s/runner-scripts-configmap.yaml
+    kubectl apply -f akamas/k8s/runner-deployment.yaml
+    kubectl apply -f akamas/k8s/k6-optimization-configmap.yaml
+    echo -e "${GREEN}✓ Akamas runner resources deployed${NC}"
+
+    # Wait for the runner pod to be ready
+    echo -e "\n${YELLOW}⏳ Waiting for akamas-runner pod...${NC}"
+    kubectl wait --for=condition=ready pod \
+      -l app=akamas-runner -n observability --timeout=180s
+    echo -e "${GREEN}✓ Runner pod ready${NC}"
+
+    # Retrieve LoadBalancer IPs for Prometheus and the runner
+    echo -e "\n${YELLOW}⏳ Waiting for Prometheus and akamas-runner LoadBalancer IPs...${NC}"
+    PROMETHEUS_LB=""
+    RUNNER_LB=""
+    for i in $(seq 1 18); do
+      PROMETHEUS_LB=$(kubectl get svc prometheus -n observability \
+        -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+      RUNNER_LB=$(kubectl get svc akamas-runner -n observability \
+        -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+      [[ -n "$PROMETHEUS_LB" && -n "$RUNNER_LB" ]] && break
+      printf "  Waiting... (%ds)\r" $(( i * 10 ))
+      sleep 10
+    done
+
+    # Inject Grafana collector footprint dashboard
+    echo -e "\n${YELLOW}📊 Injecting collector footprint dashboard into Grafana...${NC}"
+    kubectl patch configmap grafana-dashboards -n observability \
+      --type=merge \
+      -p "$(python3 -c "
+import json, sys
+with open('akamas/k8s/grafana-collector-dashboard.json') as f:
+    dash = f.read()
+print(json.dumps({'data': {'otelcol-footprint.json': dash}}))
+")"
+    echo -e "${GREEN}✓ Dashboard ConfigMap patched${NC}"
+
+    # Restart Grafana so it picks up the new dashboard immediately.
+    # (ConfigMap mounts update eventually via kubelet, but a rollout restart
+    # is faster and ensures verify-setup.sh finds the dashboard on first run.)
+    echo -e "\n${YELLOW}🔄 Restarting Grafana to load the new dashboard...${NC}"
+    kubectl rollout restart deployment/grafana -n observability
+    kubectl rollout status deployment/grafana -n observability --timeout=90s
+    echo -e "${GREEN}✓ Grafana restarted — dashboard 'OTel Collector — Footprint & Go Runtime' loaded${NC}"
+
+    echo -e "\n${GREEN}✅ Akamas Setup Complete!${NC}"
+    echo "────────────────────────────────────────────"
+    echo -e "${YELLOW}Next steps to activate the study:${NC}"
+    echo ""
+    echo "  1. Copy the private key to the Akamas server:"
+    echo "       scp ${KEY_FILE} <akamas-server>:/opt/akamas/keys/akamas-runner-key"
+    echo ""
+    echo "  2. Fill in the two placeholder IPs in the Akamas config files:"
+    echo "       Prometheus LB IP   → akamas/telemetry-instance.yaml"
+    if [[ -n "$PROMETHEUS_LB" ]]; then
+      echo "         value: ${PROMETHEUS_LB}"
+    fi
+    echo "       Runner LB IP       → akamas/workflow.yaml (both Executor tasks)"
+    if [[ -n "$RUNNER_LB" ]]; then
+      echo "         value: ${RUNNER_LB}"
+    fi
+    echo ""
+    echo "  3. Install the optimization pack and create study resources on Akamas:"
+    echo "       akamas build optimization-pack akamas/optimization-pack/"
+    echo "       akamas install optimization-pack descriptor.json"
+    echo "       akamas create system                   --file akamas/system.yaml"
+    echo "       akamas create component                --file akamas/component.yaml  \\"
+    echo "                                              --system edge-observability-stack"
+    echo "       akamas create telemetry-instance       --file akamas/telemetry-instance.yaml"
+    echo "       akamas create workflow                 --file akamas/workflow.yaml"
+    echo "       akamas create study                    --file akamas/study.yaml"
+    echo ""
+    echo "  4. Open Grafana → 'OTel Collector — Footprint & Go Runtime' to verify baseline"
+    if [[ -n "$GRAFANA_LB" ]]; then
+      echo "       http://${GRAFANA_LB}:3000"
+    fi
+    echo ""
+    echo "  5. Verify the full setup end-to-end:"
+    echo "       ./akamas/scripts/verify-setup.sh"
+    echo "       (auto-detects IPs; add --key path/to/akamas-runner-key if the key is not in the current dir)"
+    echo ""
+    echo "  ⚠️  Run the Akamas study SEPARATELY from the demo (the study restarts"
+    echo "      the collector every ~7 min and would disrupt a live demonstration)."
+    echo ""
+  fi
 
 fi
 

@@ -1,0 +1,2 @@
+name: OtelCollector
+description: OpenTelemetry Collector edge node — tunes pipeline processors and Go runtime

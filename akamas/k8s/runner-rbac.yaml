@@ -1,0 +1,72 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: akamas-runner
+  namespace: observability
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: akamas-runner
+  namespace: observability
+rules:
+  # ConfigMap: regenerate collector config each experiment
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get, create, update, patch, apply]
+  # DaemonSet: patch env vars + trigger rollout restart
+  - apiGroups: [apps]
+    resources: [daemonsets]
+    verbs: [get, patch, update]
+  - apiGroups: [apps]
+    resources: [daemonsets/status]
+    verbs: [get]
+  # Pods: watch rollout progress + wait for k6 runner to finish
+  - apiGroups: [""]
+    resources: [pods, pods/log]
+    verbs: [get, list, watch]
+  # k6 TestRun CRD: create / delete / watch
+  - apiGroups: [k6.io]
+    resources: [testruns]
+    verbs: [get, create, delete, watch, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: akamas-runner
+  namespace: observability
+subjects:
+  - kind: ServiceAccount
+    name: akamas-runner
+    namespace: observability
+roleRef:
+  kind: Role
+  name: akamas-runner
+  apiGroup: rbac.authorization.k8s.io
+---
+# ClusterRole: read-only access to cluster-scoped resources needed by
+# verify-setup.sh (kubectl get nodes) and kubectl api-resources.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: akamas-runner-cluster-reader
+rules:
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [get, list]
+  - apiGroups: [k6.io]
+    resources: [testruns]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: akamas-runner-cluster-reader
+subjects:
+  - kind: ServiceAccount
+    name: akamas-runner
+    namespace: observability
+roleRef:
+  kind: ClusterRole
+  name: akamas-runner-cluster-reader
+  apiGroup: rbac.authorization.k8s.io

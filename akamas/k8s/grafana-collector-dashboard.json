@@ -1,0 +1,803 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+      "id": 100,
+      "title": "FOOTPRINT — Objective Metrics (Akamas optimisation targets)",
+      "type": "row"
+    },
+
+    {
+      "datasource": "Prometheus",
+      "description": "Working set memory of the otel-collector container (cAdvisor). This is the primary Akamas objective: reduce without breaching safety KPIs.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 80000000},
+              {"color": "red", "value": 120000000}
+            ]
+          },
+          "unit": "bytes"
+        }
+      },
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 1},
+      "id": 1,
+      "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"]}},
+      "targets": [{
+        "expr": "container_memory_working_set_bytes{pod=~\"otel-collector.*\", container=\"otel-collector\"}",
+        "refId": "A",
+        "legendFormat": "working set"
+      }],
+      "title": "Working Set Memory",
+      "type": "stat"
+    },
+
+    {
+      "datasource": "Prometheus",
+      "description": "Resident Set Size reported by the collector process itself. Slightly higher than working set (includes shared libs). Akamas secondary reference.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 90000000},
+              {"color": "red", "value": 140000000}
+            ]
+          },
+          "unit": "bytes"
+        }
+      },
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 1},
+      "id": 2,
+      "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"]}},
+      "targets": [{
+        "expr": "otelcol_process_memory_rss",
+        "refId": "A",
+        "legendFormat": "RSS"
+      }],
+      "title": "Process RSS",
+      "type": "stat"
+    },
+
+    {
+      "datasource": "Prometheus",
+      "description": "CPU usage in millicores (rate of cpu seconds * 1000). Akamas objective: weight 0.4 in the composite score. Baseline target: < 80m.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 60},
+              {"color": "red", "value": 100}
+            ]
+          },
+          "unit": "short",
+          "decimals": 1
+        }
+      },
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 1},
+      "id": 3,
+      "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"]}},
+      "targets": [{
+        "expr": "rate(container_cpu_usage_seconds_total{pod=~\"otel-collector.*\", container=\"otel-collector\"}[2m]) * 1000",
+        "refId": "A",
+        "legendFormat": "CPU (millicores)"
+      }],
+      "title": "CPU Usage (millicores)",
+      "type": "stat"
+    },
+
+    {
+      "datasource": "Prometheus",
+      "description": "Akamas composite score: 0.6 × (working_set / 100MB) + 0.4 × (cpu_millicores / 80). Score ≤ 1.0 means within baseline. Lower is better. Use this to verify the baseline divisors before starting the study.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 0.8},
+              {"color": "red", "value": 1.2}
+            ]
+          },
+          "unit": "none",
+          "decimals": 3
+        }
+      },
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 1},
+      "id": 4,
+      "options": {"colorMode": "background", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"]}},
+      "targets": [{
+        "expr": "0.6 * (container_memory_working_set_bytes{pod=~\"otel-collector.*\", container=\"otel-collector\"} / 100000000) + 0.4 * (rate(container_cpu_usage_seconds_total{pod=~\"otel-collector.*\", container=\"otel-collector\"}[2m]) * 1000 / 80)",
+        "refId": "A",
+        "legendFormat": "Akamas Score"
+      }],
+      "title": "Akamas Composite Score (< 1.0 = within baseline)",
+      "type": "stat"
+    },
+
+    {
+      "datasource": "Prometheus",
+      "description": "Working set and RSS over time. Working set is cAdvisor (excludes cache, best for OOM), RSS is self-reported by the process (includes mmap). Both should trend flat or downward during Akamas optimisation.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "lineWidth": 2,
+            "lineInterpolation": "smooth",
+            "showPoints": "never"
+          },
+          "unit": "bytes",
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "Working Set (cAdvisor)"},
+            "properties": [{"id": "color", "value": {"fixedColor": "blue", "mode": "fixed"}}]
+          },
+          {
+            "matcher": {"id": "byName", "options": "RSS (process)"},
+            "properties": [{"id": "color", "value": {"fixedColor": "purple", "mode": "fixed"}}]
+          }
+        ]
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 5},
+      "id": 5,
+      "options": {
+        "legend": {"calcs": ["mean", "max", "last"], "displayMode": "table", "placement": "bottom"},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [
+        {
+          "expr": "container_memory_working_set_bytes{pod=~\"otel-collector.*\", container=\"otel-collector\"}",
+          "legendFormat": "Working Set (cAdvisor)",
+          "refId": "A"
+        },
+        {
+          "expr": "otelcol_process_memory_rss",
+          "legendFormat": "RSS (process)",
+          "refId": "B"
+        }
+      ],
+      "title": "Memory Trend — Working Set vs RSS",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": "Prometheus",
+      "description": "CPU consumption of the otel-collector container. Akamas objective weight = 0.4. Should remain below 80 millicores at baseline load.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "fixed", "fixedColor": "orange"},
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "lineWidth": 2,
+            "lineInterpolation": "smooth",
+            "showPoints": "never"
+          },
+          "unit": "short",
+          "min": 0
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 5},
+      "id": 6,
+      "options": {
+        "legend": {"calcs": ["mean", "max", "last"], "displayMode": "table", "placement": "bottom"},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [{
+        "expr": "rate(container_cpu_usage_seconds_total{pod=~\"otel-collector.*\", container=\"otel-collector\"}[2m]) * 1000",
+        "legendFormat": "CPU (millicores)",
+        "refId": "A"
+      }],
+      "title": "CPU Trend (millicores)",
+      "type": "timeseries"
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 13},
+      "id": 200,
+      "title": "GO RUNTIME — Heap & GC Pressure",
+      "type": "row"
+    },
+
+    {
+      "datasource": "Prometheus",
+      "description": "Go heap: currently allocated bytes vs total sys memory obtained from the OS. A growing gap between heap_alloc and total_sys suggests fragmentation. Both metrics come from the collector's own Go runtime.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "lineWidth": 2,
+            "lineInterpolation": "smooth",
+            "showPoints": "never"
+          },
+          "unit": "bytes",
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "Heap Alloc (live objects)"},
+            "properties": [{"id": "color", "value": {"fixedColor": "green", "mode": "fixed"}}]
+          },
+          {
+            "matcher": {"id": "byName", "options": "Total Sys (from OS)"},
+            "properties": [{"id": "color", "value": {"fixedColor": "blue", "mode": "fixed"}}]
+          }
+        ]
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 14},
+      "id": 7,
+      "options": {
+        "legend": {"calcs": ["mean", "max", "last"], "displayMode": "table", "placement": "bottom"},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [
+        {
+          "expr": "otelcol_process_runtime_heap_alloc_bytes",
+          "legendFormat": "Heap Alloc (live objects)",
+          "refId": "A"
+        },
+        {
+          "expr": "otelcol_process_runtime_total_sys_memory_bytes",
+          "legendFormat": "Total Sys (from OS)",
+          "refId": "B"
+        }
+      ],
+      "title": "Go Heap — Allocated vs Total Sys",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": "Prometheus",
+      "description": "Allocation rate = bytes allocated per second (all objects, before GC). High rates drive GC pressure and RSS growth. Reducing batch sizes, queue depths, or sampling windows typically lowers this. Lower is better during Akamas study.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "fixed", "fixedColor": "red"},
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "lineWidth": 2,
+            "lineInterpolation": "smooth",
+            "showPoints": "never"
+          },
+          "unit": "Bps",
+          "min": 0
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 14},
+      "id": 8,
+      "options": {
+        "legend": {"calcs": ["mean", "max", "last"], "displayMode": "table", "placement": "bottom"},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [{
+        "expr": "rate(otelcol_process_runtime_total_alloc_bytes[2m])",
+        "legendFormat": "Allocation rate (bytes/s)",
+        "refId": "A"
+      }],
+      "title": "Go Allocation Rate (GC Pressure)",
+      "type": "timeseries"
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 22},
+      "id": 300,
+      "title": "DATA INTEGRITY — Safety KPIs (all must stay at 0)",
+      "type": "row"
+    },
+
+    {
+      "datasource": "Prometheus",
+      "description": "Spans refused by the OTLP receiver (e.g. pipeline full). Any non-zero value means the experiment config is unsafe — data loss at ingestion.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 1}
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {"h": 4, "w": 4, "x": 0, "y": 23},
+      "id": 9,
+      "options": {"colorMode": "background", "graphMode": "none", "reduceOptions": {"calcs": ["sum"]}},
+      "targets": [{
+        "expr": "sum(increase(otelcol_receiver_refused_spans[5m])) or vector(0)",
+        "refId": "A",
+        "legendFormat": "Refused spans (5m)"
+      }],
+      "title": "Refused Spans",
+      "type": "stat"
+    },
+
+    {
+      "datasource": "Prometheus",
+      "description": "Metric data points refused at the receiver. Non-zero = unsafe experiment.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 1}
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {"h": 4, "w": 4, "x": 4, "y": 23},
+      "id": 10,
+      "options": {"colorMode": "background", "graphMode": "none", "reduceOptions": {"calcs": ["sum"]}},
+      "targets": [{
+        "expr": "sum(increase(otelcol_receiver_refused_metric_points[5m])) or vector(0)",
+        "refId": "A",
+        "legendFormat": "Refused metric points (5m)"
+      }],
+      "title": "Refused Metric Points",
+      "type": "stat"
+    },
+
+    {
+      "datasource": "Prometheus",
+      "description": "Log records refused at the receiver. Non-zero = unsafe experiment.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 1}
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {"h": 4, "w": 4, "x": 8, "y": 23},
+      "id": 11,
+      "options": {"colorMode": "background", "graphMode": "none", "reduceOptions": {"calcs": ["sum"]}},
+      "targets": [{
+        "expr": "sum(increase(otelcol_receiver_refused_log_records[5m])) or vector(0)",
+        "refId": "A",
+        "legendFormat": "Refused log records (5m)"
+      }],
+      "title": "Refused Log Records",
+      "type": "stat"
+    },
+
+    {
+      "datasource": "Prometheus",
+      "description": "Spans dropped by a processor (e.g. memory limiter activated). Non-zero = unsafe experiment.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 1}
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {"h": 4, "w": 4, "x": 12, "y": 23},
+      "id": 12,
+      "options": {"colorMode": "background", "graphMode": "none", "reduceOptions": {"calcs": ["sum"]}},
+      "targets": [{
+        "expr": "sum(increase(otelcol_processor_dropped_spans[5m])) or vector(0)",
+        "refId": "A",
+        "legendFormat": "Dropped spans (5m)"
+      }],
+      "title": "Dropped Spans (Processor)",
+      "type": "stat"
+    },
+
+    {
+      "datasource": "Prometheus",
+      "description": "Metric data points dropped by a processor. Non-zero = unsafe experiment.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 1}
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {"h": 4, "w": 4, "x": 16, "y": 23},
+      "id": 13,
+      "options": {"colorMode": "background", "graphMode": "none", "reduceOptions": {"calcs": ["sum"]}},
+      "targets": [{
+        "expr": "sum(increase(otelcol_processor_dropped_metric_points[5m])) or vector(0)",
+        "refId": "A",
+        "legendFormat": "Dropped metric points (5m)"
+      }],
+      "title": "Dropped Metric Points (Processor)",
+      "type": "stat"
+    },
+
+    {
+      "datasource": "Prometheus",
+      "description": "Log records dropped by a processor. Non-zero = unsafe experiment.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 1}
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {"h": 4, "w": 4, "x": 20, "y": 23},
+      "id": 14,
+      "options": {"colorMode": "background", "graphMode": "none", "reduceOptions": {"calcs": ["sum"]}},
+      "targets": [{
+        "expr": "sum(increase(otelcol_processor_dropped_log_records[5m])) or vector(0)",
+        "refId": "A",
+        "legendFormat": "Dropped log records (5m)"
+      }],
+      "title": "Dropped Log Records (Processor)",
+      "type": "stat"
+    },
+
+    {
+      "datasource": "Prometheus",
+      "description": "Rate of refused signals at the receivers over time. Any spike means the pipeline is overwhelmed at ingestion — experiment config must be rejected by Akamas.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "lineWidth": 2,
+            "lineInterpolation": "smooth",
+            "showPoints": "never"
+          },
+          "unit": "cps",
+          "min": 0
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 27},
+      "id": 15,
+      "options": {
+        "legend": {"calcs": ["max", "sum"], "displayMode": "table", "placement": "bottom"},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [
+        {
+          "expr": "rate(otelcol_receiver_refused_spans[1m])",
+          "legendFormat": "Refused spans/s",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(otelcol_receiver_refused_metric_points[1m])",
+          "legendFormat": "Refused metric points/s",
+          "refId": "B"
+        },
+        {
+          "expr": "rate(otelcol_receiver_refused_log_records[1m])",
+          "legendFormat": "Refused log records/s",
+          "refId": "C"
+        }
+      ],
+      "title": "Receiver Refused Rate — must stay at 0",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": "Prometheus",
+      "description": "Rate of data dropped by processors over time. Typically triggered by the memory_limiter when RSS exceeds the configured limit. Any non-zero means the memory limit is too aggressive for the current workload.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "lineWidth": 2,
+            "lineInterpolation": "smooth",
+            "showPoints": "never"
+          },
+          "unit": "cps",
+          "min": 0
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 27},
+      "id": 16,
+      "options": {
+        "legend": {"calcs": ["max", "sum"], "displayMode": "table", "placement": "bottom"},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [
+        {
+          "expr": "rate(otelcol_processor_dropped_spans[1m])",
+          "legendFormat": "Dropped spans/s",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(otelcol_processor_dropped_metric_points[1m])",
+          "legendFormat": "Dropped metric points/s",
+          "refId": "B"
+        },
+        {
+          "expr": "rate(otelcol_processor_dropped_log_records[1m])",
+          "legendFormat": "Dropped log records/s",
+          "refId": "C"
+        }
+      ],
+      "title": "Processor Drop Rate — must stay at 0",
+      "type": "timeseries"
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 35},
+      "id": 400,
+      "title": "PIPELINE THROUGHPUT — signal flow through the collector",
+      "type": "row"
+    },
+
+    {
+      "datasource": "Prometheus",
+      "description": "Telemetry signals accepted by the collector's receivers. This is the raw input rate from the application and Fluent Bit. Should be stable across experiments — Akamas must not reduce throughput.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "lineWidth": 2,
+            "lineInterpolation": "smooth",
+            "showPoints": "never"
+          },
+          "unit": "cps",
+          "min": 0
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 36},
+      "id": 17,
+      "options": {
+        "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [
+        {
+          "expr": "rate(otelcol_receiver_accepted_spans[1m])",
+          "legendFormat": "Spans accepted",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(otelcol_receiver_accepted_metric_points[1m])",
+          "legendFormat": "Metric points accepted",
+          "refId": "B"
+        },
+        {
+          "expr": "rate(otelcol_receiver_accepted_log_records[1m])",
+          "legendFormat": "Log records accepted",
+          "refId": "C"
+        }
+      ],
+      "title": "Receiver Accepted Rate",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": "Prometheus",
+      "description": "Signals successfully exported to the backends (Jaeger, Loki, Prometheus). Lower than accepted rate is expected for traces due to tail sampling. Should not drop to zero during Akamas experiments (no network disruption during study).",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "lineWidth": 2,
+            "lineInterpolation": "smooth",
+            "showPoints": "never"
+          },
+          "unit": "cps",
+          "min": 0
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 36},
+      "id": 18,
+      "options": {
+        "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [
+        {
+          "expr": "rate(otelcol_exporter_sent_spans[1m])",
+          "legendFormat": "Spans sent",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(otelcol_exporter_sent_metric_points[1m])",
+          "legendFormat": "Metric points sent",
+          "refId": "B"
+        },
+        {
+          "expr": "rate(otelcol_exporter_sent_log_records[1m])",
+          "legendFormat": "Log records sent",
+          "refId": "C"
+        }
+      ],
+      "title": "Exporter Sent Rate",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": "Prometheus",
+      "description": "Total batches waiting in the file-backed persistent queue across all exporters. Should remain near 0 during Akamas experiments (no network disruption). A growing queue means exporter throughput cannot keep up with producer rate.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "fixed", "fixedColor": "yellow"},
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "thresholdsStyle": {"mode": "line"}
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 1}
+            ]
+          },
+          "unit": "short",
+          "min": 0
+        }
+      },
+      "gridPos": {"h": 6, "w": 24, "x": 0, "y": 44},
+      "id": 19,
+      "options": {
+        "legend": {"displayMode": "list", "placement": "bottom"},
+        "tooltip": {"mode": "single"}
+      },
+      "targets": [{
+        "expr": "sum(otelcol_exporter_queue_size) or vector(0)",
+        "refId": "A",
+        "legendFormat": "Queue depth (batches)"
+      }],
+      "title": "Export Queue Depth — should be 0 during Akamas study",
+      "type": "timeseries"
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 50},
+      "id": 500,
+      "title": "TAIL SAMPLER — trace sampling decisions",
+      "type": "row"
+    },
+
+    {
+      "datasource": "Prometheus",
+      "description": "Traces kept (sampled=true) vs dropped (sampled=false) by policy. The tail sampler reduces trace export volume to only errors and slow requests. Should remain stable across experiments — sampling policy is not an Akamas parameter.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "lineWidth": 2,
+            "lineInterpolation": "smooth",
+            "showPoints": "never"
+          },
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "Sampled (kept)"},
+            "properties": [{"id": "color", "value": {"fixedColor": "green", "mode": "fixed"}}]
+          },
+          {
+            "matcher": {"id": "byName", "options": "Not sampled (dropped)"},
+            "properties": [{"id": "color", "value": {"fixedColor": "red", "mode": "fixed"}}]
+          }
+        ]
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 51},
+      "id": 20,
+      "options": {
+        "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(otelcol_processor_tail_sampling_count_traces_sampled{sampled=\"true\"}[1m])) or vector(0)",
+          "legendFormat": "Sampled (kept)",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(otelcol_processor_tail_sampling_count_traces_sampled{sampled=\"false\"}[1m])) or vector(0)",
+          "legendFormat": "Not sampled (dropped)",
+          "refId": "B"
+        }
+      ],
+      "title": "Tail Sampling Decisions — Sampled vs Dropped",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": "Prometheus",
+      "description": "New trace IDs arriving at the tail sampler. This is the raw input rate to the decision buffer (decision_wait=5s). Proportional to application request rate. Should be stable across Akamas experiments.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "fixed", "fixedColor": "blue"},
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "lineWidth": 2,
+            "lineInterpolation": "smooth",
+            "showPoints": "never"
+          },
+          "unit": "short",
+          "min": 0
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 51},
+      "id": 21,
+      "options": {
+        "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [{
+        "expr": "sum(rate(otelcol_processor_tail_sampling_new_trace_id_received[1m])) or vector(0)",
+        "legendFormat": "New trace IDs/s",
+        "refId": "A"
+      }],
+      "title": "New Trace IDs Received (Sampler Input Rate)",
+      "type": "timeseries"
+    }
+
+  ],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["edge", "akamas", "collector"],
+  "time": {"from": "now-30m", "to": "now"},
+  "timezone": "",
+  "title": "OTel Collector — Footprint & Go Runtime",
+  "uid": "otelcol-footprint-akamas",
+  "version": 1
+}

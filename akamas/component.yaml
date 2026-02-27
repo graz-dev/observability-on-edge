@@ -1,0 +1,10 @@
+name: collector
+description: OTel Collector DaemonSet pod on the edge node (node-role=edge)
+componentType: OtelCollector
+properties:
+  # Akamas uses these labels to scope Prometheus queries via $JOB$ / %FILTERS%
+  prometheus:
+    job: otel-collector
+    # 'instance' is the value of the 'instance' label on otelcol_* metrics.
+    # The collector sets it to the pod name; use a regex to match any replica.
+    instance: ".*"

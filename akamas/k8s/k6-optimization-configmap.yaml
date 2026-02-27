@@ -1,0 +1,152 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k6-optimization-script
+  namespace: observability
+data:
+  k6-optimization.js: |
+    import http from 'k6/http';
+    import { check, sleep } from 'k6';
+    import { Counter, Rate, Trend } from 'k6/metrics';
+
+    const errorRate     = new Rate('errors');
+    const sensorErrors  = new Counter('sensor_errors');
+    const slowDiagnostics = new Counter('slow_diagnostics');
+    const latency       = new Trend('request_latency');
+
+    // Optimisation workload — heavier than the demo to fully exercise all
+    // tunable parameters, in particular the tail-sampler LRU map (tail_num_traces).
+    //
+    // Why 100 VUs and tighter sleep on fast endpoints?
+    //   tail_num_traces range: 1 000 – 20 000.
+    //   To put 1 000 traces in flight simultaneously (lower bound of the range):
+    //     needed rate = 1 000 / decision_wait(5s) = 200 traces/s.
+    //   At 8 VUs (demo load) the app generates ~5 traces/s → only ~25 in flight.
+    //   At 100 VUs with 0.1–0.5s fast-endpoint sleep → ~255 traces/s → ~1 275 in
+    //   flight at default decision_wait, which covers the meaningful part of the range.
+    //
+    // Traffic mix is identical to the demo (same scenario, higher concurrency):
+    //   50% engine sensors  — fast (~50 ms),   sleep 0.1–0.5 s (rapid polling)
+    //   30% navigation      — fast (~50 ms),   sleep 0.1–0.5 s
+    //   12% diagnostics     — slow (500–1500 ms), sleep 2–7 s  (kept as-is)
+    //    8% system alerts   — error-prone,     sleep 0.1–0.5 s
+    //
+    // Ramp shape:
+    //   30s → 20 VU  (cluster warm-up)
+    //   30s → 50 VU  (intermediate ramp)
+    //    1m → 100 VU (reach full load)
+    //   10m @ 100 VU (steady state — Prometheus measurement window, duration: 600)
+    //   30s → 0 VU   (ramp-down)
+    //   Total ≈ 12.5 min workload + ~90 s collector restart = ~14 min/experiment
+    export const options = {
+      stages: [
+        { duration: '30s', target: 20  },
+        { duration: '30s', target: 50  },
+        { duration: '1m',  target: 100 },
+        { duration: '10m', target: 100 },
+        { duration: '30s', target: 0   },
+      ],
+      thresholds: {
+        'http_req_duration': ['p(95)<600'],
+        'errors': ['rate<0.15'],
+      },
+    };
+
+    const BASE_URL = __ENV.BASE_URL || 'http://edge-demo-app.observability.svc.cluster.local:8080';
+
+    export default function () {
+      const scenario = Math.random();
+
+      if (scenario < 0.5) {
+        monitorEngine();
+      } else if (scenario < 0.8) {
+        monitorNavigation();
+      } else if (scenario < 0.92) {
+        runDiagnostics();
+        return;  // runDiagnostics has its own longer sleep
+      } else {
+        checkAlerts();
+      }
+
+      // Tighter sleep on fast endpoints: vessels poll sensors at high frequency.
+      sleep(Math.random() * 0.4 + 0.1);
+    }
+
+    function monitorEngine() {
+      const startTime = Date.now();
+      const res = http.get(`${BASE_URL}/api/sensors/engine`);
+      const duration = Date.now() - startTime;
+
+      const success = check(res, {
+        'engine sensors status is 200': (r) => r.status === 200,
+        'engine read time < 150ms':     (r) => r.timings.duration < 150,
+      });
+
+      errorRate.add(!success);
+      latency.add(duration);
+      if (duration > 200) slowDiagnostics.add(1);
+    }
+
+    function monitorNavigation() {
+      const startTime = Date.now();
+      const res = http.get(`${BASE_URL}/api/sensors/navigation`);
+      const duration = Date.now() - startTime;
+
+      const success = check(res, {
+        'navigation sensors status is 200': (r) => r.status === 200,
+        'navigation read time < 120ms':     (r) => r.timings.duration < 120,
+      });
+
+      errorRate.add(!success);
+      latency.add(duration);
+      if (duration > 200) slowDiagnostics.add(1);
+    }
+
+    function runDiagnostics() {
+      const startTime = Date.now();
+      const res = http.get(`${BASE_URL}/api/analytics/diagnostics`);
+      const duration = Date.now() - startTime;
+
+      const success = check(res, {
+        'diagnostics completed':     (r) => r.status === 200,
+        'diagnostics time < 1500ms': (r) => r.timings.duration < 1500,
+      });
+
+      errorRate.add(!success);
+      latency.add(duration);
+      if (duration > 500) slowDiagnostics.add(1);
+
+      sleep(Math.random() * 5 + 2);  // 2–7 s — complex operation, kept realistic
+    }
+
+    function checkAlerts() {
+      const startTime = Date.now();
+      const res = http.get(`${BASE_URL}/api/alerts/system`);
+      const duration = Date.now() - startTime;
+
+      const success = check(res, {
+        'alert check completed': (r) => r.status === 200 || r.status === 500,
+      });
+
+      if (res.status === 500) sensorErrors.add(1);
+      errorRate.add(!success);
+      latency.add(duration);
+      if (duration > 200) slowDiagnostics.add(1);
+    }
+
+    export function handleSummary(data) {
+      const d = data.metrics;
+      let s = '\n';
+      s += ' Optimisation Workload Complete\n';
+      s += ' ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
+      s += ` HTTP Reqs:  ${d.http_reqs.values.count} total\n`;
+      s += ` Duration:   ${Math.round(data.state.testRunDurationMs / 1000)}s\n`;
+      s += ' ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
+      s += ` Avg latency:          ${Math.round(d.http_req_duration.values.avg)}ms\n`;
+      s += ` P95 latency:          ${Math.round(d.http_req_duration.values['p(95)'])}ms\n`;
+      s += ` Error rate:           ${(d.errors.values.rate * 100).toFixed(2)}%\n`;
+      s += ` Slow requests >200ms: ${d.slow_diagnostics ? d.slow_diagnostics.values.count : 'n/a'}\n`;
+      s += ` Sensor comm errors:   ${d.sensor_errors ? d.sensor_errors.values.count : 'n/a'}\n`;
+      s += ' ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
+      return { stdout: s };
+    }

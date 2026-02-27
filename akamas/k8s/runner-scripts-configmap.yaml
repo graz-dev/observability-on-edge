@@ -1,0 +1,220 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: akamas-runner-scripts
+  namespace: observability
+data:
+  apply-config.sh: |
+    #!/bin/bash
+    # Symlink target — actual script content lives in akamas/scripts/apply-config.sh
+    # and is injected here so the runner pod always has the latest version.
+    # Keep this file in sync with akamas/scripts/apply-config.sh.
+    set -euo pipefail
+
+    NAMESPACE="${NAMESPACE:-observability}"
+    BATCH_SEND_MAX_SIZE=$((BATCH_SEND_SIZE * 2))
+    GOMEMLIMIT_BYTES=$((GOMEMLIMIT_MIB * 1024 * 1024))
+
+    echo "[apply-config] params:"
+    echo "  batch: timeout=${BATCH_TIMEOUT_S}s size=${BATCH_SEND_SIZE} max=${BATCH_SEND_MAX_SIZE}"
+    echo "  tail:  decision_wait=${TAIL_DECISION_WAIT_S}s num_traces=${TAIL_NUM_TRACES}"
+    echo "  memlimiter: limit=${MEMORY_LIMIT_MIB}Mi spike=${MEMORY_SPIKE_MIB}Mi"
+    echo "  go: GOGC=${GOGC} GOMEMLIMIT=${GOMEMLIMIT_MIB}Mi GOMAXPROCS=${GOMAXPROCS}"
+
+    kubectl apply -n "$NAMESPACE" -f - << EOF
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: otel-collector-config
+      namespace: ${NAMESPACE}
+    data:
+      otel-collector-config.yaml: |
+        extensions:
+          health_check:
+            endpoint: 0.0.0.0:13133
+          file_storage:
+            directory: /var/lib/otelcol/file_storage
+            timeout: 10s
+        receivers:
+          otlp:
+            protocols:
+              grpc:
+                endpoint: 0.0.0.0:4317
+              http:
+                endpoint: 0.0.0.0:4318
+        processors:
+          memory_limiter:
+            check_interval: 1s
+            limit_mib: ${MEMORY_LIMIT_MIB}
+            spike_limit_mib: ${MEMORY_SPIKE_MIB}
+          batch:
+            timeout: ${BATCH_TIMEOUT_S}s
+            send_batch_size: ${BATCH_SEND_SIZE}
+            send_batch_max_size: ${BATCH_SEND_MAX_SIZE}
+          resource:
+            attributes:
+              - key: deployment.environment
+                value: edge
+                action: insert
+              - key: cluster.name
+                value: edge-observability
+                action: insert
+          tail_sampling:
+            decision_wait: ${TAIL_DECISION_WAIT_S}s
+            num_traces: ${TAIL_NUM_TRACES}
+            expected_new_traces_per_sec: 10
+            policies:
+              - name: error-policy
+                type: status_code
+                status_code:
+                  status_codes:
+                    - ERROR
+              - name: latency-policy
+                type: latency
+                latency:
+                  threshold_ms: 200
+        exporters:
+          otlp/jaeger:
+            endpoint: jaeger.observability.svc.cluster.local:4317
+            tls:
+              insecure: true
+            sending_queue:
+              enabled: true
+              num_consumers: 1
+              queue_size: 1000
+              storage: file_storage
+            retry_on_failure:
+              enabled: true
+              initial_interval: 5s
+              max_interval: 30s
+              max_elapsed_time: 300s
+          prometheusremotewrite:
+            endpoint: http://prometheus.observability.svc.cluster.local:9090/api/v1/write
+            tls:
+              insecure: true
+            retry_on_failure:
+              enabled: true
+              initial_interval: 5s
+              max_interval: 30s
+              max_elapsed_time: 300s
+          loki:
+            endpoint: http://loki.observability.svc.cluster.local:3100/loki/api/v1/push
+            tls:
+              insecure: true
+            sending_queue:
+              enabled: true
+              num_consumers: 1
+              queue_size: 1000
+              storage: file_storage
+            retry_on_failure:
+              enabled: true
+              initial_interval: 5s
+              max_interval: 30s
+              max_elapsed_time: 300s
+        service:
+          extensions: [health_check, file_storage]
+          pipelines:
+            traces:
+              receivers: [otlp]
+              processors: [memory_limiter, resource, tail_sampling, batch]
+              exporters: [otlp/jaeger]
+            metrics:
+              receivers: [otlp]
+              processors: [memory_limiter, resource, batch]
+              exporters: [prometheusremotewrite]
+            logs:
+              receivers: [otlp]
+              processors: [memory_limiter, resource, batch]
+              exporters: [loki]
+          telemetry:
+            logs:
+              level: info
+            metrics:
+              address: 0.0.0.0:8888
+              level: detailed
+    EOF
+
+    kubectl set env daemonset/otel-collector \
+      -n "$NAMESPACE" \
+      "GOGC=${GOGC}" \
+      "GOMEMLIMIT=${GOMEMLIMIT_BYTES}" \
+      "GOMAXPROCS=${GOMAXPROCS}"
+
+    echo "[apply-config] restarting DaemonSet..."
+    kubectl rollout restart daemonset/otel-collector -n "$NAMESPACE"
+    kubectl rollout status daemonset/otel-collector -n "$NAMESPACE" --timeout=120s
+    echo "[apply-config] collector is ready"
+
+  run-workload.sh: |
+    #!/bin/bash
+    set -euo pipefail
+
+    NAMESPACE="${NAMESPACE:-observability}"
+    TESTRUN_NAME="akamas-opt-workload"
+    TIMEOUT_SECONDS=900
+
+    echo "[run-workload] deleting previous TestRun (if any)..."
+    kubectl delete testrun "$TESTRUN_NAME" -n "$NAMESPACE" --ignore-not-found=true
+    kubectl wait pod -n "$NAMESPACE" -l "k6_cr=${TESTRUN_NAME}" \
+      --for=delete --timeout=60s 2>/dev/null || true
+
+    echo "[run-workload] creating TestRun..."
+    kubectl apply -n "$NAMESPACE" -f - << EOF
+    apiVersion: k6.io/v1alpha1
+    kind: TestRun
+    metadata:
+      name: ${TESTRUN_NAME}
+      namespace: ${NAMESPACE}
+    spec:
+      parallelism: 1
+      script:
+        configMap:
+          name: k6-optimization-script
+          file: k6-optimization.js
+      runner:
+        image: grafana/k6:latest
+        imagePullPolicy: IfNotPresent
+        nodeSelector:
+          node-role: edge
+        env:
+          - name: BASE_URL
+            value: http://edge-demo-app.observability.svc.cluster.local:8080
+        resources:
+          requests:
+            cpu: "200m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+    EOF
+
+    echo "[run-workload] waiting for runner pod..."
+    DEADLINE=$((SECONDS + 60))
+    POD=""
+    while [[ $SECONDS -lt $DEADLINE ]]; do
+      POD=$(kubectl get pod -n "$NAMESPACE" -l "k6_cr=${TESTRUN_NAME}" \
+            -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+      [[ -n "$POD" ]] && break
+      sleep 3
+    done
+
+    if [[ -z "$POD" ]]; then
+      echo "[run-workload] ERROR: runner pod did not appear within 60s"
+      exit 1
+    fi
+
+    echo "[run-workload] runner pod: $POD"
+    kubectl wait pod "$POD" -n "$NAMESPACE" \
+      --for=jsonpath='{.status.phase}'=Succeeded \
+      --timeout="${TIMEOUT_SECONDS}s"
+
+    EXIT_CODE=$(kubectl get pod "$POD" -n "$NAMESPACE" \
+      -o jsonpath='{.status.containerStatuses[0].state.terminated.exitCode}' 2>/dev/null || echo "0")
+
+    if [[ "$EXIT_CODE" != "0" ]]; then
+      echo "[run-workload] k6 test failed (exit code ${EXIT_CODE})"
+      kubectl logs "$POD" -n "$NAMESPACE" --tail=50 || true
+      exit 1
+    fi
+
+    echo "[run-workload] workload complete"

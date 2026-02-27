@@ -1,0 +1,6 @@
+name: edge-observability-stack
+description: >
+  Edge node running the OTel Collector DaemonSet (otel-collector-edge:0.2.0)
+  on a Civo K3s cluster. Collector handles traces (tail-sampling → Jaeger),
+  metrics (prometheusremotewrite → Prometheus), and logs (Loki OTLP).
+  Target: minimise RSS + CPU footprint while guaranteeing zero data drop.

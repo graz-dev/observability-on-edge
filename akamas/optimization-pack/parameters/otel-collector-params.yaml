@@ -1,0 +1,124 @@
+parameters:
+  # ── Batch processor ────────────────────────────────────────────────────────
+  # How long the processor accumulates spans/logs/metrics before flushing.
+  # Larger → fewer flushes, higher in-flight memory; smaller → more CPU overhead.
+  - name: batch_timeout_s
+    description: Batch flush timeout (seconds)
+    unit: seconds
+    restart: true
+    domain:
+      type: integer
+      min: 1
+      max: 10
+      step: 1
+      default: 5
+
+  # Target number of items per batch. Larger → fewer network round-trips but
+  # more heap per batch; smaller → lower per-batch memory at higher call rate.
+  - name: batch_send_size
+    description: Target batch item count (spans / log records / data-points)
+    unit: ""
+    restart: true
+    domain:
+      type: integer
+      min: 128
+      max: 2048
+      step: 128
+      default: 512
+
+  # ── Tail-based sampling ─────────────────────────────────────────────────────
+  # Window during which all spans of a trace are held in memory awaiting a
+  # decision.  This is the single biggest memory driver: high decision_wait ×
+  # high expected_new_traces_per_sec → large in-memory trace buffer.
+  - name: tail_decision_wait_s
+    description: Tail-sampling decision window (seconds)
+    unit: seconds
+    restart: true
+    domain:
+      type: integer
+      min: 2
+      max: 10
+      step: 1
+      default: 5
+
+  # Upper bound on concurrent in-flight traces held in the sampler's LRU map.
+  # Evicted entries are decided immediately as "sampled", so too-small values
+  # increase false positives; too-large values waste RSS.
+  - name: tail_num_traces
+    description: Max number of in-flight traces held in tail-sampler LRU map
+    unit: ""
+    restart: true
+    domain:
+      type: integer
+      min: 1000
+      max: 20000
+      step: 1000
+      default: 10000
+
+  # ── Memory limiter ──────────────────────────────────────────────────────────
+  # Soft cap on process RSS.  When exceeded, the limiter starts refusing new
+  # data (back-pressure); when spike headroom is used up, it hard-refuses.
+  # Must be well below the K8s memory limit (512 Mi).
+  - name: memory_limit_mib
+    description: memory_limiter hard limit (MiB) — must be < K8s limit (512 Mi)
+    unit: megabytes
+    restart: true
+    domain:
+      type: integer
+      min: 128
+      max: 450
+      step: 32
+      default: 400
+
+  - name: memory_spike_mib
+    description: memory_limiter spike headroom (MiB) above limit_mib
+    unit: megabytes
+    restart: true
+    domain:
+      type: integer
+      min: 20
+      max: 80
+      step: 10
+      default: 80
+
+  # ── Go runtime ─────────────────────────────────────────────────────────────
+  # GOGC: GC target percentage.  Lower → GC runs more often → lower heap
+  # ceiling → more CPU; higher → larger heap before GC → less CPU but more RSS.
+  - name: gogc
+    description: Go GC target percentage (GOGC env var)
+    unit: percent
+    restart: true
+    domain:
+      type: integer
+      min: 50
+      max: 200
+      step: 10
+      default: 80
+
+  # GOMEMLIMIT: soft memory ceiling for the Go heap (MiB).  When RSS approaches
+  # this value the runtime ignores GOGC and collects aggressively.  Effective
+  # floor on RSS — set below memory_limit_mib.
+  - name: gomemlimit_mib
+    description: Go soft memory limit (GOMEMLIMIT env var, MiB)
+    unit: megabytes
+    restart: true
+    domain:
+      type: integer
+      min: 100
+      max: 380
+      step: 20
+      default: 300
+
+  # GOMAXPROCS: number of OS threads the scheduler can use in parallel.
+  # Fewer threads → less CPU contention and context switching; too few → risk
+  # of goroutine starvation on the gRPC/HTTP listener paths.
+  - name: gomaxprocs
+    description: Go max OS threads (GOMAXPROCS env var)
+    unit: ""
+    restart: true
+    domain:
+      type: integer
+      min: 1
+      max: 4
+      step: 1
+      default: 2
