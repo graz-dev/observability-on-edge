@@ -1,4 +1,4 @@
-kind: telemetry
+kind: telemetry-instance
 system: edgeobservabilitystack
 name: Prometheus
 provider: Prometheus
