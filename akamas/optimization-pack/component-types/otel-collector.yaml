@@ -44,7 +44,7 @@ parameters:
   # Evicted entries are decided immediately as "sampled", so too-small values
   # increase false positives; too-large values waste RSS.
   - name: tail_num_traces
-    unit: integer
+    unit: ""
     restart: true
     domain:
       type: integer
@@ -107,7 +107,7 @@ parameters:
   # Fewer threads → less CPU contention and context switching; too few → risk
   # of goroutine starvation on the gRPC/HTTP listener paths.
   - name: gomaxprocs
-    unit: procs
+    unit: ""
     restart: true
     domain:
       type: integer
