@@ -18,7 +18,7 @@ parameters:
   - name: batch_send_size
     domain:
       type: integer
-      domanin: [128, 2048]
+      domain: [128, 2048]
     defaultValue: 512
     operators:
       FileConfigurator: 
