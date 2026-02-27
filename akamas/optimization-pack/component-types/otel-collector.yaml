@@ -6,7 +6,6 @@ parameters:
   # How long the processor accumulates spans/logs/metrics before flushing.
   # Larger → fewer flushes, higher in-flight memory; smaller → more CPU overhead.
   - name: batch_timeout_s
-    unit: seconds
     domain:
       type: integer
       domain: [1, 10]
@@ -17,7 +16,6 @@ parameters:
   # Target number of items per batch. Larger → fewer network round-trips but
   # more heap per batch; smaller → lower per-batch memory at higher call rate.
   - name: batch_send_size
-    unit: kilobytes
     restart: true
     domain:
       type: integer
@@ -31,7 +29,6 @@ parameters:
   # decision.  This is the single biggest memory driver: high decision_wait ×
   # high expected_new_traces_per_sec → large in-memory trace buffer.
   - name: tail_decision_wait_s
-    unit: seconds
     restart: true
     domain:
       type: integer
@@ -44,7 +41,6 @@ parameters:
   # Evicted entries are decided immediately as "sampled", so too-small values
   # increase false positives; too-large values waste RSS.
   - name: tail_num_traces
-    unit: ""
     restart: true
     domain:
       type: integer
@@ -58,7 +54,6 @@ parameters:
   # data (back-pressure); when spike headroom is used up, it hard-refuses.
   # Must be well below the K8s memory limit (512 Mi).
   - name: memory_limit_mib
-    unit: megabytes
     restart: true
     domain:
       type: integer
@@ -68,7 +63,6 @@ parameters:
       FileConfigurator: 
 
   - name: memory_spike_mib
-    unit: megabytes
     restart: true
     domain:
       type: integer
@@ -81,7 +75,6 @@ parameters:
   # GOGC: GC target percentage.  Lower → GC runs more often → lower heap
   # ceiling → more CPU; higher → larger heap before GC → less CPU but more RSS.
   - name: gogc
-    unit: percent
     restart: true
     domain:
       type: integer
@@ -94,7 +87,6 @@ parameters:
   # this value the runtime ignores GOGC and collects aggressively.  Effective
   # floor on RSS — set below memory_limit_mib.
   - name: gomemlimit_mib
-    unit: megabytes
     restart: true
     domain:
       type: integer
@@ -107,7 +99,6 @@ parameters:
   # Fewer threads → less CPU contention and context switching; too few → risk
   # of goroutine starvation on the gRPC/HTTP listener paths.
   - name: gomaxprocs
-    unit: ""
     restart: true
     domain:
       type: integer
