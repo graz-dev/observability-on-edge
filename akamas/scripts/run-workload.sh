@@ -4,6 +4,8 @@
 # finish.  Akamas then queries Prometheus over the 5-min steady-state window.
 #
 # Runs inside the akamas-runner pod with in-cluster kubectl.
+export KUBECONFIG=/work/kubeconfig
+
 set -euo pipefail
 
 NAMESPACE="${NAMESPACE:-observability}"

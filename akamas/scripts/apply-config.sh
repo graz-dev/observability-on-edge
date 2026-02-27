@@ -5,6 +5,8 @@
 #   MEMORY_LIMIT_MIB, MEMORY_SPIKE_MIB, GOGC, GOMEMLIMIT_MIB, GOMAXPROCS
 #
 # Runs inside the akamas-runner pod (Civo cluster) with in-cluster kubectl.
+export KUBECONFIG=/work/kubeconfig
+
 set -euo pipefail
 
 NAMESPACE="${NAMESPACE:-observability}"
