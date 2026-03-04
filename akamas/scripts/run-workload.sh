@@ -48,7 +48,7 @@ spec:
       node-role: edge
     env:
       - name: BASE_URL
-        value: http://edge-demo-app.observability.svc.cluster.local:8080
+        value: http://edge-demo-app.app.svc.cluster.local:8080
     resources:
       requests:
         cpu: "200m"

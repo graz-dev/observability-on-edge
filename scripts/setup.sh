@@ -135,16 +135,16 @@ if [[ "$DEMO_ENV" == "local" ]]; then
   echo -e "${GREEN}✓ Resources applied${NC}"
 
   echo -e "\n${YELLOW}⏳ Waiting for hub components to be ready...${NC}"
-  kubectl wait --for=condition=ready pod -l app=jaeger -n observability --timeout=300s
-  kubectl wait --for=condition=ready pod -l app=prometheus -n observability --timeout=300s
-  kubectl wait --for=condition=ready pod -l app=loki -n observability --timeout=300s
-  kubectl wait --for=condition=ready pod -l app=grafana -n observability --timeout=300s
+  kubectl wait --for=condition=ready pod -l app=jaeger -n hub-obs --timeout=300s
+  kubectl wait --for=condition=ready pod -l app=prometheus -n hub-obs --timeout=300s
+  kubectl wait --for=condition=ready pod -l app=loki -n hub-obs --timeout=300s
+  kubectl wait --for=condition=ready pod -l app=grafana -n hub-obs --timeout=300s
   echo -e "${GREEN}✓ Hub components ready${NC}"
 
   echo -e "\n${YELLOW}⏳ Waiting for edge components to be ready...${NC}"
-  kubectl wait --for=condition=ready pod -l app=otel-collector -n observability --timeout=300s
-  kubectl wait --for=condition=ready pod -l app=edge-demo-app -n observability --timeout=180s
-  kubectl wait --for=condition=ready pod -l app=network-chaos -n observability --timeout=120s
+  kubectl wait --for=condition=ready pod -l app=otel-collector -n edge-obs --timeout=300s
+  kubectl wait --for=condition=ready pod -l app=edge-demo-app -n app --timeout=180s
+  kubectl wait --for=condition=ready pod -l app=network-chaos -n testing --timeout=120s
   echo -e "${GREEN}✓ Edge components ready (including network-chaos)${NC}"
 
   # Display cluster information
@@ -158,7 +158,7 @@ if [[ "$DEMO_ENV" == "local" ]]; then
   echo "  - Jaeger:      http://localhost:30686"
   echo ""
   echo "  To access Prometheus (port-forward required):"
-  echo "    kubectl port-forward -n observability svc/prometheus 9090:9090"
+  echo "    kubectl port-forward -n hub-obs svc/prometheus 9090:9090"
   echo "    Then open: http://localhost:9090"
   echo ""
 
@@ -242,10 +242,10 @@ else
   echo -e "${GREEN}✓ Resources applied${NC}"
 
   echo -e "\n${YELLOW}⏳ Waiting for hub components to be ready...${NC}"
-  kubectl wait --for=condition=ready pod -l app=jaeger -n observability --timeout=300s
-  kubectl wait --for=condition=ready pod -l app=prometheus -n observability --timeout=300s
-  kubectl wait --for=condition=ready pod -l app=loki -n observability --timeout=300s
-  kubectl wait --for=condition=ready pod -l app=grafana -n observability --timeout=300s
+  kubectl wait --for=condition=ready pod -l app=jaeger -n hub-obs --timeout=300s
+  kubectl wait --for=condition=ready pod -l app=prometheus -n hub-obs --timeout=300s
+  kubectl wait --for=condition=ready pod -l app=loki -n hub-obs --timeout=300s
+  kubectl wait --for=condition=ready pod -l app=grafana -n hub-obs --timeout=300s
   echo -e "${GREEN}✓ Hub components ready${NC}"
 
   # On Civo, the otel-collector PVC uses local-path (WaitForFirstConsumer):
@@ -253,7 +253,7 @@ else
   # be pulled from ghcr.io. Allow 600s total for this sequence.
   echo -e "\n${YELLOW}⏳ Waiting for otelcol PVC to be bound...${NC}"
   for i in $(seq 1 24); do
-    pvc_phase=$(kubectl get pvc otelcol-file-storage -n observability \
+    pvc_phase=$(kubectl get pvc otelcol-file-storage -n edge-obs \
       -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
     if [[ "$pvc_phase" == "Bound" ]]; then
       echo -e "${GREEN}✓ PVC bound${NC}"
@@ -264,9 +264,9 @@ else
   done
 
   echo -e "\n${YELLOW}⏳ Waiting for edge components to be ready...${NC}"
-  kubectl wait --for=condition=ready pod -l app=otel-collector -n observability --timeout=600s
-  kubectl wait --for=condition=ready pod -l app=edge-demo-app -n observability --timeout=180s
-  kubectl wait --for=condition=ready pod -l app=network-chaos -n observability --timeout=120s
+  kubectl wait --for=condition=ready pod -l app=otel-collector -n edge-obs --timeout=600s
+  kubectl wait --for=condition=ready pod -l app=edge-demo-app -n app --timeout=180s
+  kubectl wait --for=condition=ready pod -l app=network-chaos -n testing --timeout=120s
   echo -e "${GREEN}✓ Edge components ready (including network-chaos)${NC}"
 
   # Wait for LoadBalancer IPs (Civo assigns them within ~60s)
@@ -274,9 +274,9 @@ else
   GRAFANA_LB=""
   JAEGER_LB=""
   for i in $(seq 1 30); do
-    GRAFANA_LB=$(kubectl get svc grafana -n observability \
+    GRAFANA_LB=$(kubectl get svc grafana -n hub-obs \
       -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
-    JAEGER_LB=$(kubectl get svc jaeger -n observability \
+    JAEGER_LB=$(kubectl get svc jaeger -n hub-obs \
       -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
     if [[ -n "$GRAFANA_LB" && -n "$JAEGER_LB" ]]; then
       echo -e "\n${GREEN}✓ LoadBalancer IPs assigned${NC}"
@@ -288,7 +288,7 @@ else
 
   if [[ -z "$GRAFANA_LB" || -z "$JAEGER_LB" ]]; then
     echo -e "${YELLOW}⚠️  LoadBalancer IPs not yet assigned. Check with:${NC}"
-    echo "    kubectl get svc -n observability"
+    echo "    kubectl get svc -n hub-obs"
   fi
 
   # Display access information
@@ -298,7 +298,7 @@ else
   if [[ -n "$GRAFANA_LB" ]]; then
     echo "  - Grafana:     http://${GRAFANA_LB}:3000"
   else
-    echo "  - Grafana:     (LB IP pending — kubectl get svc grafana -n observability)"
+    echo "  - Grafana:     (LB IP pending — kubectl get svc grafana -n hub-obs)"
   fi
   echo "    Username: admin"
   echo "    Password: admin"
@@ -306,7 +306,7 @@ else
   if [[ -n "$JAEGER_LB" ]]; then
     echo "  - Jaeger:      http://${JAEGER_LB}:16686"
   else
-    echo "  - Jaeger:      (LB IP pending — kubectl get svc jaeger -n observability)"
+    echo "  - Jaeger:      (LB IP pending — kubectl get svc jaeger -n hub-obs)"
   fi
   echo ""
   echo ""
@@ -322,52 +322,20 @@ else
     kubectl apply -f overlays/civo/patches/prometheus-lb.yaml
     echo -e "${GREEN}✓ Prometheus LoadBalancer service applied${NC}"
 
-    # Generate SSH key pair if not already present
-    KEY_FILE="akamas-runner-key"
-    if [[ ! -f "$KEY_FILE" ]]; then
-      ssh-keygen -t ed25519 -f "$KEY_FILE" -N "" -C "akamas-runner"
-      echo -e "${GREEN}✓ SSH key pair generated: ${KEY_FILE} / ${KEY_FILE}.pub${NC}"
-    else
-      echo -e "${YELLOW}⚠️  Using existing SSH key: ${KEY_FILE}${NC}"
-    fi
-
-    # Create / update the SSH public-key Secret in the cluster
-    kubectl create secret generic akamas-runner-pubkey \
-      -n observability \
-      --from-file=authorized_keys="${KEY_FILE}.pub" \
-      --dry-run=client -o yaml | kubectl apply -f -
-    echo -e "${GREEN}✓ SSH public key stored in Secret 'akamas-runner-pubkey'${NC}"
-
-    # Deploy runner RBAC, Deployment, Service, and ConfigMaps
-    kubectl apply -f akamas/k8s/runner-rbac.yaml
-    kubectl apply -f akamas/k8s/runner-scripts-configmap.yaml
-    kubectl apply -f akamas/k8s/runner-deployment.yaml
-    kubectl apply -f akamas/k8s/k6-optimization-configmap.yaml
-    echo -e "${GREEN}✓ Akamas runner resources deployed${NC}"
-
-    # Wait for the runner pod to be ready
-    echo -e "\n${YELLOW}⏳ Waiting for akamas-runner pod...${NC}"
-    kubectl wait --for=condition=ready pod \
-      -l app=akamas-runner -n observability --timeout=180s
-    echo -e "${GREEN}✓ Runner pod ready${NC}"
-
-    # Retrieve LoadBalancer IPs for Prometheus and the runner
-    echo -e "\n${YELLOW}⏳ Waiting for Prometheus and akamas-runner LoadBalancer IPs...${NC}"
+    # Retrieve LoadBalancer IP for Prometheus
+    echo -e "\n${YELLOW}⏳ Waiting for Prometheus LoadBalancer IP...${NC}"
     PROMETHEUS_LB=""
-    RUNNER_LB=""
     for i in $(seq 1 18); do
-      PROMETHEUS_LB=$(kubectl get svc prometheus -n observability \
+      PROMETHEUS_LB=$(kubectl get svc prometheus -n hub-obs \
         -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
-      RUNNER_LB=$(kubectl get svc akamas-runner -n observability \
-        -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
-      [[ -n "$PROMETHEUS_LB" && -n "$RUNNER_LB" ]] && break
+      [[ -n "$PROMETHEUS_LB" ]] && break
       printf "  Waiting... (%ds)\r" $(( i * 10 ))
       sleep 10
     done
 
     # Inject Grafana collector footprint dashboard
     echo -e "\n${YELLOW}📊 Injecting collector footprint dashboard into Grafana...${NC}"
-    kubectl patch configmap grafana-dashboards -n observability \
+    kubectl patch configmap grafana-dashboards -n hub-obs \
       --type=merge \
       -p "$(python3 -c "
 import json, sys
@@ -378,48 +346,35 @@ print(json.dumps({'data': {'otelcol-footprint.json': dash}}))
     echo -e "${GREEN}✓ Dashboard ConfigMap patched${NC}"
 
     # Restart Grafana so it picks up the new dashboard immediately.
-    # (ConfigMap mounts update eventually via kubelet, but a rollout restart
-    # is faster and ensures verify-setup.sh finds the dashboard on first run.)
     echo -e "\n${YELLOW}🔄 Restarting Grafana to load the new dashboard...${NC}"
-    kubectl rollout restart deployment/grafana -n observability
-    kubectl rollout status deployment/grafana -n observability --timeout=90s
+    kubectl rollout restart deployment/grafana -n hub-obs
+    kubectl rollout status deployment/grafana -n hub-obs --timeout=90s
     echo -e "${GREEN}✓ Grafana restarted — dashboard 'OTel Collector — Footprint & Go Runtime' loaded${NC}"
 
     echo -e "\n${GREEN}✅ Akamas Setup Complete!${NC}"
     echo "────────────────────────────────────────────"
     echo -e "${YELLOW}Next steps to activate the study:${NC}"
     echo ""
-    echo "  1. Copy the private key to the Akamas server:"
-    echo "       scp ${KEY_FILE} <akamas-server>:/opt/akamas/keys/akamas-runner-key"
-    echo ""
-    echo "  2. Fill in the two placeholder IPs in the Akamas config files:"
-    echo "       Prometheus LB IP   → akamas/telemetry-instance.yaml"
+    echo "  1. Fill in the Prometheus LB IP in the Akamas config:"
+    echo "       Prometheus LB IP → akamas/system/telemetry-instance/telemetry-instance.yaml"
     if [[ -n "$PROMETHEUS_LB" ]]; then
       echo "         value: ${PROMETHEUS_LB}"
     fi
-    echo "       Runner LB IP       → akamas/workflow.yaml (both Executor tasks)"
-    if [[ -n "$RUNNER_LB" ]]; then
-      echo "         value: ${RUNNER_LB}"
-    fi
     echo ""
-    echo "  3. Install the optimization pack and create study resources on Akamas:"
+    echo "  2. Install the optimization pack and create study resources on Akamas:"
     echo "       akamas build optimization-pack akamas/optimization-pack/"
     echo "       akamas install optimization-pack descriptor.json"
-    echo "       akamas create system                   --file akamas/system.yaml"
-    echo "       akamas create component                --file akamas/component.yaml  \\"
+    echo "       akamas create system                   --file akamas/system/system.yaml"
+    echo "       akamas create component                --file akamas/system/components/component.yaml  \\"
     echo "                                              --system edge-observability-stack"
-    echo "       akamas create telemetry-instance       --file akamas/telemetry-instance.yaml"
+    echo "       akamas create telemetry-instance       --file akamas/system/telemetry-instance/telemetry-instance.yaml"
     echo "       akamas create workflow                 --file akamas/workflow.yaml"
     echo "       akamas create study                    --file akamas/study.yaml"
     echo ""
-    echo "  4. Open Grafana → 'OTel Collector — Footprint & Go Runtime' to verify baseline"
+    echo "  3. Open Grafana → 'OTel Collector — Footprint & Go Runtime' to verify baseline"
     if [[ -n "$GRAFANA_LB" ]]; then
       echo "       http://${GRAFANA_LB}:3000"
     fi
-    echo ""
-    echo "  5. Verify the full setup end-to-end:"
-    echo "       ./akamas/scripts/verify-setup.sh"
-    echo "       (auto-detects IPs; add --key path/to/akamas-runner-key if the key is not in the current dir)"
     echo ""
     echo "  ⚠️  Run the Akamas study SEPARATELY from the demo (the study restarts"
     echo "      the collector every ~7 min and would disrupt a live demonstration)."
@@ -431,7 +386,7 @@ fi
 echo -e "\n${YELLOW}🔍 Cluster Status:${NC}"
 kubectl get nodes -o wide
 echo ""
-kubectl get pods -n observability -o wide
+kubectl get pods -A -o wide
 
 echo -e "\n${YELLOW}📝 Next Steps:${NC}"
 echo "  1. Start load test (k6 Operator):  ./scripts/load-generator.sh"

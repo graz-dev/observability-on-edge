@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: prometheus-config
-  namespace: observability
+  namespace: hub-obs
 data:
   prometheus.yml: |
     global:
@@ -19,7 +19,7 @@ data:
 
       - job_name: 'otel-collector'
         static_configs:
-          - targets: ['otel-collector.observability.svc.cluster.local:8888']
+          - targets: ['otel-collector.edge-obs.svc.cluster.local:8888']
             labels:
               component: 'otel-collector'
               node_role: 'edge'
@@ -32,7 +32,7 @@ data:
           - role: pod
             namespaces:
               names:
-                - observability
+                - edge-obs
         relabel_configs:
           - source_labels: [__meta_kubernetes_pod_label_app]
             action: keep

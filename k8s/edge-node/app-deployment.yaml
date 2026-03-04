@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: edge-demo-app
-  namespace: observability
+  namespace: app
   labels:
     app: edge-demo-app
     component: application
@@ -28,7 +28,7 @@ spec:
           name: http
         env:
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
-          value: "otel-collector.observability.svc.cluster.local:4317"
+          value: "otel-collector.edge-obs.svc.cluster.local:4317"
         - name: OTEL_SERVICE_NAME
           value: "edge-demo-app"
         - name: OTEL_RESOURCE_ATTRIBUTES

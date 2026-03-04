@@ -2,7 +2,7 @@ apiVersion: k6.io/v1alpha1
 kind: TestRun
 metadata:
   name: vessel-monitoring
-  namespace: observability
+  namespace: testing
 spec:
   parallelism: 1
   script:
@@ -20,7 +20,7 @@ spec:
       node-role: edge
     env:
       - name: BASE_URL
-        value: http://edge-demo-app.observability.svc.cluster.local:8080
+        value: http://edge-demo-app.app.svc.cluster.local:8080
     resources:
       requests:
         cpu: "200m"

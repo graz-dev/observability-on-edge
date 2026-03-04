@@ -2,7 +2,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: otelcol-file-storage
-  namespace: observability
+  namespace: edge-obs
 spec:
   accessModes:
     - ReadWriteOnce

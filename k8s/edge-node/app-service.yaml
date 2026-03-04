@@ -2,7 +2,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: edge-demo-app
-  namespace: observability
+  namespace: app
   labels:
     app: edge-demo-app
 spec:

@@ -23,28 +23,27 @@ On edge hardware, memory and CPU are constrained resources. Manually tuning nine
 ```
 Akamas server (EKS, :9000 via port-forward)
       │
-      │ SSH ──────────────────────────────────────────────────────────┐
-      │                                                               │
-      │                                            akamas-runner pod  │
-      │                                            (Civo, hub node)   │
-      │                                               │               │
-      │                                               │ kubectl       │
-      │                                               │ (in-cluster)  │
-      │                                               ▼               │
-      │                                   applies collector ConfigMap  │
-      │                                   patches DaemonSet env vars  │
-      │                                   rollout restart + wait      │
-      │                                   creates k6 TestRun + waits  │
+      │ SSH ─── Akamas toolbox ──────────────────────────────────────┐
+      │         /work/kubeconfig                                      │
+      │              │                                               │
+      │              │ kubectl (via kubeconfig → Civo cluster)       │
+      │              ▼                                               │
+      │         applies collector ConfigMap (edge-obs)               │
+      │         patches DaemonSet env vars  (edge-obs)               │
+      │         rollout restart + wait      (edge-obs)               │
+      │         creates k6 TestRun + waits  (testing)                │
       │                                                               │
       │ Prometheus scrape ─────────────────────────────────────────────
       │      http://<PROMETHEUS_LB_IP>:9090
       └───────────────────────────────────────────────────────────────
 ```
 
+Akamas runs `apply-config.sh` and `run-workload.sh` directly from its own toolbox using the Civo kubeconfig stored at `/work/kubeconfig`. No in-cluster runner pod is required.
+
 Per-experiment flow (≈ 11 min):
 1. Akamas picks a set of parameter values
-2. Executor SSH → `apply-config.sh` → applies the config and restarts the collector
-3. Executor SSH → `run-workload.sh` → creates a k6 TestRun and waits for completion
+2. Toolbox runs `apply-config.sh` via kubeconfig → applies the config and restarts the collector (`edge-obs` namespace)
+3. Toolbox runs `run-workload.sh` via kubeconfig → creates a k6 TestRun and waits for completion (`testing` namespace)
 4. Akamas reads metrics from Prometheus over the steady-state window (8 min)
 5. The optimiser updates its model and picks the next parameter set
 
@@ -119,7 +118,7 @@ akamas/
 ├── system.yaml             # Akamas system: edge-observability-stack
 ├── component.yaml          # Component: collector (type OtelCollector, Prometheus labels)
 ├── telemetry-instance.yaml # Prometheus provider → <PROMETHEUS_LB_IP>:9090
-├── workflow.yaml           # Workflow: apply-config → run-workload via SSH
+├── workflow.yaml           # Workflow: apply-config → run-workload (via Akamas toolbox kubeconfig)
 ├── study.yaml              # Study: objective, KPIs, parameters, 60 experiments
 │
 ├── scripts/
@@ -127,11 +126,11 @@ akamas/
 │   └── run-workload.sh     # Creates k6 TestRun and waits for completion
 │
 └── k8s/                    # Kubernetes resources to deploy in the Civo cluster
-    ├── runner-rbac.yaml              # ServiceAccount + Role + RoleBinding for the runner
-    ├── runner-deployment.yaml        # Deployment + LoadBalancer Service for the SSH runner
-    ├── runner-scripts-configmap.yaml # apply-config.sh and run-workload.sh mounted in the runner
+    ├── runner-scripts-configmap.yaml  # apply-config.sh and run-workload.sh (copies in-cluster)
     └── k6-optimization-configmap.yaml # Shortened k6 script (8 min steady-state) for iterations
 ```
+
+> **Note:** `runner-deployment.yaml` and `runner-rbac.yaml` are intentionally empty — the SSH runner pod has been removed. Akamas uses its own kubeconfig (`/work/kubeconfig`) to run scripts directly against the Civo cluster.
 
 Changes to the main repository:
 
@@ -215,64 +214,42 @@ If any KPI is violated, Akamas marks the experiment as **unsafe** and penalises 
 ./scripts/setup.sh --env civo --akamas
 ```
 
-The `--akamas` flag automatically runs steps 1–4 below and prints the two IPs to configure.
+The `--akamas` flag automatically runs steps 1–3 below and prints the Prometheus IP to configure.
 
 ### Option B — manual step by step
 
 **1. Expose Prometheus via LoadBalancer** (already included in `overlays/civo` — done by `kubectl apply -k overlays/civo`)
 
-**2. Generate the SSH key pair for the runner**
+**2. Deploy the k6 optimisation ConfigMap**
 
 ```bash
-ssh-keygen -t ed25519 -f akamas-runner-key -N "" -C "akamas-runner"
-```
-
-**3. Create the Secret with the public key in the cluster**
-
-```bash
-kubectl create secret generic akamas-runner-pubkey \
-  -n observability \
-  --from-file=authorized_keys=akamas-runner-key.pub
-```
-
-**4. Deploy the runner Kubernetes resources**
-
-```bash
-kubectl apply -f akamas/k8s/runner-rbac.yaml
 kubectl apply -f akamas/k8s/runner-scripts-configmap.yaml
-kubectl apply -f akamas/k8s/runner-deployment.yaml
 kubectl apply -f akamas/k8s/k6-optimization-configmap.yaml
-
-kubectl wait --for=condition=ready pod \
-  -l app=akamas-runner -n observability --timeout=180s
 ```
 
-**5. Retrieve the two LoadBalancer IPs**
+**3. Retrieve the Prometheus LoadBalancer IP**
 
 ```bash
-kubectl get svc prometheus akamas-runner -n observability \
+kubectl get svc prometheus -n hub-obs \
   -o custom-columns='NAME:.metadata.name,IP:.status.loadBalancer.ingress[0].ip'
 ```
 
-**6. Fill in the placeholders in the Akamas config files**
+**4. Copy the Civo kubeconfig to the Akamas toolbox**
+
+The scripts expect the kubeconfig at `/work/kubeconfig` on the Akamas toolbox.
+The `KUBECONFIG` environment variable overrides this path if already set in the toolbox.
+
+```bash
+# Example: copy your local kubeconfig into the Akamas toolbox
+AKAMAS_POD=$(kubectl get pod -n akamas -l app=akamas -o jsonpath='{.items[0].metadata.name}')
+kubectl cp ~/.kube/config ${AKAMAS_POD}:/work/kubeconfig -n akamas
+```
+
+**5. Fill in the placeholder in the Akamas config files**
 
 ```bash
 # telemetry-instance.yaml → Prometheus address
 sed -i 's/<PROMETHEUS_LB_IP>/1.2.3.4/g' akamas/telemetry-instance.yaml
-
-# workflow.yaml → SSH runner host (appears twice, once per task)
-sed -i 's/<RUNNER_LB_IP>/5.6.7.8/g' akamas/workflow.yaml
-```
-
-**7. Copy the private key to the Akamas server**
-
-The method depends on your Akamas setup (kubectl cp, secret, etc.).
-The path expected by the workflow is `/opt/akamas/keys/akamas-runner-key`.
-
-```bash
-# Example using kubectl cp to the Akamas pod
-AKAMAS_POD=$(kubectl get pod -n akamas -l app=akamas -o jsonpath='{.items[0].metadata.name}')
-kubectl cp akamas-runner-key ${AKAMAS_POD}:/opt/akamas/keys/akamas-runner-key -n akamas
 ```
 
 ---
@@ -369,7 +346,7 @@ The dashboard (`uid: otelcol-footprint-akamas`) is loaded from `akamas/k8s/grafa
 | **Memory Trend — Working Set vs RSS** (timeseries) | Working set (cAdvisor, blue) + RSS (process, purple) | Shows how memory evolves over time. A rising trend means a parameter combination is causing accumulation — Akamas should penalise it. The gap between RSS and working set reflects Go's lazy page release. | Both signals should be flat during the 10-min steady-state window |
 | **CPU Trend** (timeseries) | `rate(container_cpu_usage_seconds_total{...}[2m]) * 1000` | CPU in millicores over time. Akamas searches for configurations that reduce both this and the working-set trend simultaneously. | Flat after ramp-up; no sustained growth |
 
-**"No Data" on cAdvisor panels?** The `kubernetes-cadvisor` scrape job must be present in `prometheus-config.yaml`. If missing, add it and restart Prometheus: `kubectl rollout restart deployment/prometheus -n observability`.
+**"No Data" on cAdvisor panels?** The `kubernetes-cadvisor` scrape job must be present in `prometheus-config.yaml`. If missing, add it and restart Prometheus: `kubectl rollout restart deployment/prometheus -n hub-obs`.
 
 ---
 
@@ -445,9 +422,6 @@ Before launching the optimisation, confirm the following in Grafana:
 
 **The study and the demo are mutually exclusive.**
 The workflow restarts the collector every ≈ 11 minutes. Do not run the KubeCon demo while the study is active.
-
-**The runner pod is idle during the demo.**
-It runs on the hub node (not the edge node) and consumes ≈ 50m CPU / 64Mi RAM only when Akamas connects via SSH. It does not affect the collector or the app during the demo.
 
 **Recovery from a failed experiment.**
 If an experiment fails for infrastructural reasons (Civo network instability, pod eviction), Akamas counts it against `maxFailedExperiments`. With `maxFailedExperiments: 15` the study tolerates up to 15 failures before aborting.

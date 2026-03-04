@@ -7,7 +7,7 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-NAMESPACE="observability"
+NAMESPACE="testing"
 TESTRUN_NAME="vessel-monitoring"
 
 echo -e "${GREEN}⚓ Starting Maritime Vessel Monitoring Load Test${NC}"

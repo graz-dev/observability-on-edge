@@ -87,7 +87,7 @@ data:
 
     exporters:
       otlp/jaeger:
-        endpoint: jaeger.observability.svc.cluster.local:4317
+        endpoint: jaeger.hub-obs.svc.cluster.local:4317
         tls:
           insecure: true
         sending_queue:
@@ -102,7 +102,7 @@ data:
           max_elapsed_time: 300s
 
       prometheusremotewrite:
-        endpoint: http://prometheus.observability.svc.cluster.local:9090/api/v1/write
+        endpoint: http://prometheus.hub-obs.svc.cluster.local:9090/api/v1/write
         tls:
           insecure: true
         retry_on_failure:
@@ -112,7 +112,7 @@ data:
           max_elapsed_time: 300s
 
       loki:
-        endpoint: http://loki.observability.svc.cluster.local:3100/loki/api/v1/push
+        endpoint: http://loki.hub-obs.svc.cluster.local:3100/loki/api/v1/push
         tls:
           insecure: true
         sending_queue:

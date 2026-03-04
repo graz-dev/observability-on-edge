@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: akamas-runner-scripts
-  namespace: observability
+  namespace: edge-obs
 data:
   apply-config.sh: |
     #!/bin/bash
@@ -11,7 +11,7 @@ data:
     # Keep this file in sync with akamas/scripts/apply-config.sh.
     set -euo pipefail
 
-    NAMESPACE="${NAMESPACE:-observability}"
+    NAMESPACE="${NAMESPACE:-edge-obs}"
     BATCH_SEND_MAX_SIZE=$((BATCH_SEND_SIZE * 2))
     GOMEMLIMIT_BYTES=$((GOMEMLIMIT_MIB * 1024 * 1024))
 
@@ -75,7 +75,7 @@ data:
                   threshold_ms: 200
         exporters:
           otlp/jaeger:
-            endpoint: jaeger.observability.svc.cluster.local:4317
+            endpoint: jaeger.hub-obs.svc.cluster.local:4317
             tls:
               insecure: true
             sending_queue:
@@ -89,7 +89,7 @@ data:
               max_interval: 30s
               max_elapsed_time: 300s
           prometheusremotewrite:
-            endpoint: http://prometheus.observability.svc.cluster.local:9090/api/v1/write
+            endpoint: http://prometheus.hub-obs.svc.cluster.local:9090/api/v1/write
             tls:
               insecure: true
             retry_on_failure:
@@ -98,7 +98,7 @@ data:
               max_interval: 30s
               max_elapsed_time: 300s
           loki:
-            endpoint: http://loki.observability.svc.cluster.local:3100/loki/api/v1/push
+            endpoint: http://loki.hub-obs.svc.cluster.local:3100/loki/api/v1/push
             tls:
               insecure: true
             sending_queue:
@@ -149,7 +149,7 @@ data:
     #!/bin/bash
     set -euo pipefail
 
-    NAMESPACE="${NAMESPACE:-observability}"
+    NAMESPACE="${NAMESPACE:-testing}"
     TESTRUN_NAME="akamas-opt-workload"
     TIMEOUT_SECONDS=900
 
@@ -178,7 +178,7 @@ data:
           node-role: edge
         env:
           - name: BASE_URL
-            value: http://edge-demo-app.observability.svc.cluster.local:8080
+            value: http://edge-demo-app.app.svc.cluster.local:8080
         resources:
           requests:
             cpu: "200m"

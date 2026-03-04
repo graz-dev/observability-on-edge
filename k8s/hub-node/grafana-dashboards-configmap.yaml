@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: grafana-dashboards
-  namespace: observability
+  namespace: hub-obs
   labels:
     grafana_dashboard: "1"
 data:

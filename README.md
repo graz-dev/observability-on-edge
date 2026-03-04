@@ -267,7 +267,7 @@ A Go HTTP server simulating a maritime vessel monitoring system. Four endpoints 
 | `GET /api/analytics/diagnostics` | 300–1500 ms | 0% | **Kept** (latency policy: >200ms) | 12% |
 | `GET /api/alerts/system` | 80–160 ms | 20% | **Kept** if error (error policy), **dropped** if success | 8% |
 
-Every request handler attaches `trace_id` and `span_id` to the structured log output (zap JSON logger). The application sends telemetry via OTLP gRPC to the OTel Collector at `otel-collector.observability.svc.cluster.local:4317`.
+Every request handler attaches `trace_id` and `span_id` to the structured log output (zap JSON logger). The application sends telemetry via OTLP gRPC to the OTel Collector at `otel-collector.edge-obs.svc.cluster.local:4317`.
 
 **Custom metrics exported:**
 - `http.server.request.count` — Int64Counter, incremented per request, labels: `http.route`, `http.status_code`
@@ -299,10 +299,10 @@ The `edge-demo-app` image is built automatically via GitHub Actions (`.github/wo
 
 Fluent Bit runs as a DaemonSet on edge nodes, reading container logs from `/var/log/pods/`. The pipeline is:
 
-1. **Input (tail):** Read lines from `observability_edge-demo-app*/**/*.log` using the CRI log format parser.
+1. **Input (tail):** Read lines from `app_edge-demo-app*/**/*.log` using the CRI log format parser.
 2. **Filter (Kubernetes):** Enrich each log record with pod name, namespace, labels, and annotations.
 3. **Filter (Lua script):** Apply the sampling filter — keep only `level=error` or `duration_ms >= 200`. Drop everything else. This reduces log volume by ~86% before the data ever leaves the node.
-4. **Output (OpenTelemetry HTTP):** Forward kept records to the OTel Collector at `otel-collector.observability.svc.cluster.local:4318` via OTLP HTTP.
+4. **Output (OpenTelemetry HTTP):** Forward kept records to the OTel Collector at `otel-collector.edge-obs.svc.cluster.local:4318` via OTLP HTTP.
 
 Fluent Bit exposes Prometheus metrics at `:2020/api/v1/metrics/prometheus` (note: the path is specific to Fluent Bit 2.x, not the conventional `/metrics`). Prometheus scrapes these metrics for the "Log Flow" panel in the Edge Pipeline dashboard.
 
@@ -390,9 +390,9 @@ Deletes the k3d cluster and all associated resources.
 If re-running Act 3, you must clear stale queue files first. Old bbolt entries contain metric timestamps that Prometheus will reject as out-of-order:
 
 ```bash
-CHAOS_POD=$(kubectl get pod -n observability -l app=network-chaos -o jsonpath='{.items[0].metadata.name}')
-kubectl exec -n observability "$CHAOS_POD" -- find /var/lib/otelcol/file_storage -type f -delete
-kubectl rollout restart daemonset/otel-collector -n observability
+CHAOS_POD=$(kubectl get pod -n testing -l app=network-chaos -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n testing "$CHAOS_POD" -- find /var/lib/otelcol/file_storage -type f -delete
+kubectl rollout restart daemonset/otel-collector -n edge-obs
 ```
 
 Wait for the collector DaemonSet to come back up before running the demo again.
@@ -555,7 +555,7 @@ A single gRPC call carrying 512 spans is orders of magnitude cheaper than 512 in
 
 ```yaml
   otlp/jaeger:
-    endpoint: jaeger.observability.svc.cluster.local:4317
+    endpoint: jaeger.hub-obs.svc.cluster.local:4317
     tls:
       insecure: true
     sending_queue:
@@ -580,7 +580,7 @@ The exporter name `otlp/jaeger` uses the name/alias syntax: `<type>/<alias>`. Th
 
 ```yaml
   prometheusremotewrite:
-    endpoint: http://prometheus.observability.svc.cluster.local:9090/api/v1/write
+    endpoint: http://prometheus.hub-obs.svc.cluster.local:9090/api/v1/write
     tls:
       insecure: true
     retry_on_failure:
@@ -597,7 +597,7 @@ The absence of `storage: file_storage` is a known limitation of the `prometheusr
 
 ```yaml
   loki:
-    endpoint: http://loki.observability.svc.cluster.local:3100/loki/api/v1/push
+    endpoint: http://loki.hub-obs.svc.cluster.local:3100/loki/api/v1/push
     tls:
       insecure: true
     sending_queue:
@@ -651,7 +651,7 @@ Configuration is in `k8s/edge-node/fluentbit-config.yaml`, split into three sect
 ```ini
 [INPUT]
     Name              tail
-    Path              /var/log/pods/observability_edge-demo-app*/*/*.log
+    Path              /var/log/pods/app_edge-demo-app*/*/*.log
     Parser            cri
     Mem_Buf_Limit     5MB
     storage.type      filesystem
@@ -667,7 +667,7 @@ The path glob matches CRI-format log files for the `edge-demo-app` pod. CRI form
 
 [OUTPUT]
     Name                 opentelemetry
-    Host                 otel-collector.observability.svc.cluster.local
+    Host                 otel-collector.edge-obs.svc.cluster.local
     Port                 4318
     Log_response_payload True
     tls                  off
@@ -750,7 +750,7 @@ The 15-second scrape interval is the minimum time resolution for all Prometheus 
 scrape_configs:
   - job_name: 'otel-collector'
     static_configs:
-      - targets: ['otel-collector.observability.svc.cluster.local:8888']
+      - targets: ['otel-collector.edge-obs.svc.cluster.local:8888']
         labels:
           component: 'otel-collector'
           node_role: 'edge'
@@ -764,7 +764,7 @@ OTel Collector metrics come from the collector's own Prometheus endpoint at port
     kubernetes_sd_configs:
       - role: pod
         namespaces:
-          names: [observability]
+          names: [edge-obs]
     relabel_configs:
       - source_labels: [__meta_kubernetes_pod_label_app]
         action: keep
@@ -1220,12 +1220,12 @@ observability-on-edge/
 ### Collector pods are CrashLooping
 
 ```bash
-kubectl logs -n observability daemonset/otel-collector --previous
+kubectl logs -n edge-obs daemonset/otel-collector --previous
 ```
 
 Common causes:
 - **Configuration parse error:** Validate YAML syntax in `otel-collector-config.yaml`.
-- **Memory limit exceeded:** Check for OOM events: `kubectl describe pod -n observability <collector-pod>`. Reduce traffic or increase `spec.containers[0].resources.limits.memory`.
+- **Memory limit exceeded:** Check for OOM events: `kubectl describe pod -n edge-obs <collector-pod>`. Reduce traffic or increase `spec.containers[0].resources.limits.memory`.
 - **File storage permission error:** The path `/var/lib/otelcol/file_storage` must be writable by the process (runs as root). On local k3d, `hostPath.type: DirectoryOrCreate` handles this automatically.
 
 ### `otelcol_exporter_queue_size` always shows 0
@@ -1233,7 +1233,7 @@ Common causes:
 Check all three conditions:
 1. `telemetry.metrics.level: detailed` is set in the collector config
 2. `num_consumers: 1` is set for `otlp/jaeger` and `loki` exporters
-3. The collector was restarted after the config change: `kubectl rollout restart daemonset/otel-collector -n observability`
+3. The collector was restarted after the config change: `kubectl rollout restart daemonset/otel-collector -n edge-obs`
 4. A network failure simulation is currently active (run `simulate-network-failure.sh` first)
 
 ### Stale queue files causing export errors after demo reset
@@ -1241,36 +1241,36 @@ Check all three conditions:
 Old bbolt entries contain metric timestamps that Prometheus rejects as out-of-order. Symptoms: collector logs show HTTP 400 errors, "Permanent Data Drops" panel shows non-zero values.
 
 ```bash
-CHAOS_POD=$(kubectl get pod -n observability -l app=network-chaos -o jsonpath='{.items[0].metadata.name}')
-kubectl exec -n observability "$CHAOS_POD" -- find /var/lib/otelcol/file_storage -type f -delete
-kubectl rollout restart daemonset/otel-collector -n observability
+CHAOS_POD=$(kubectl get pod -n testing -l app=network-chaos -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n testing "$CHAOS_POD" -- find /var/lib/otelcol/file_storage -type f -delete
+kubectl rollout restart daemonset/otel-collector -n edge-obs
 ```
 
 ### iptables rules not blocking traffic
 
 Verify rules in both backends:
 ```bash
-CHAOS_POD=$(kubectl get pod -n observability -l app=network-chaos -o jsonpath='{.items[0].metadata.name}')
-kubectl exec -n observability "$CHAOS_POD" -- sh -c \
+CHAOS_POD=$(kubectl get pod -n testing -l app=network-chaos -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n testing "$CHAOS_POD" -- sh -c \
   "iptables -L FORWARD -n 2>/dev/null; echo '---'; iptables-legacy -L FORWARD -n 2>/dev/null"
 ```
 
 If rules are present but traffic still flows, conntrack was not flushed:
 ```bash
 POD_IP=$(cat /tmp/otel-collector-pod-ip)
-kubectl exec -n observability "$CHAOS_POD" -- conntrack -D -s "$POD_IP"
+kubectl exec -n testing "$CHAOS_POD" -- conntrack -D -s "$POD_IP"
 ```
 
 ### Gap-fill not working for logs after restore
 
 Verify Loki has `unordered_writes: true`:
 ```bash
-kubectl exec -n observability deployment/loki -- grep unordered /etc/loki/loki.yaml
+kubectl exec -n hub-obs deployment/loki -- grep unordered /etc/loki/loki.yaml
 ```
 
 If missing, update `loki-config.yaml`, re-apply, and restart Loki:
 ```bash
-kubectl rollout restart deployment/loki -n observability
+kubectl rollout restart deployment/loki -n hub-obs
 ```
 
 ### Civo: PVC stuck in `Pending`
@@ -1278,7 +1278,7 @@ kubectl rollout restart deployment/loki -n observability
 The `civo-volume` StorageClass uses `WaitForFirstConsumer` binding mode. The PVC binds to a node only when a pod is scheduled. This resolves automatically once the DaemonSet pod is placed. `setup.sh` polls for PVC `Bound` status before proceeding.
 
 ```bash
-kubectl describe pvc otelcol-file-storage -n observability
+kubectl describe pvc otelcol-file-storage -n edge-obs
 ```
 
 ### Civo: node count stuck at 0 during setup

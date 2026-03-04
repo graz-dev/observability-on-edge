@@ -11,7 +11,7 @@ metrics:
   - name: working_set_bytes
     description: Container working set memory (bytes) — K8s OOM killer reference
     unit: bytes
-    ## datasourceMetric: 'container_memory_working_set_bytes{pod=~"otel-collector.*", container="otel-collector", namespace="observability"}'
+    ## datasourceMetric: 'container_memory_working_set_bytes{pod=~"otel-collector.*", container="otel-collector", namespace="edge-obs"}'
 
   # otelcol_process_memory_rss: collector self-reported RSS.
   # Kept as a cross-reference metric — inflated by MADV_FREE on Go 1.12+,
@@ -26,7 +26,7 @@ metrics:
   - name: cpu_millicores
     description: Collector CPU usage (millicores) — rate over full measurement window
     unit: millicores
-    #datasourceMetric: 'rate(container_cpu_usage_seconds_total{pod=~"otel-collector.*", container="otel-collector", namespace="observability"}[$DURATION$]) * 1000'
+    #datasourceMetric: 'rate(container_cpu_usage_seconds_total{pod=~"otel-collector.*", container="otel-collector", namespace="edge-obs"}[$DURATION$]) * 1000'
 
   # ── SLO / safety metrics (KPIs — must not be violated) ─────────────────────
 

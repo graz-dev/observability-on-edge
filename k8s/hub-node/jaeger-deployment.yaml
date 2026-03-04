@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: jaeger
-  namespace: observability
+  namespace: hub-obs
   labels:
     app: jaeger
     component: tracing

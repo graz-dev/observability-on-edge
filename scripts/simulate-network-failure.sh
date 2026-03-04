@@ -11,7 +11,7 @@ echo -e "${YELLOW}🔌 Simulating Satellite Link Loss...${NC}"
 echo "=========================================="
 
 # Get the network-chaos pod (privileged, hostNetwork — iptables commands affect the node directly)
-CHAOS_POD=$(kubectl get pod -n observability -l app=network-chaos \
+CHAOS_POD=$(kubectl get pod -n testing -l app=network-chaos \
   -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
 
 if [ -z "$CHAOS_POD" ]; then
@@ -21,7 +21,7 @@ fi
 
 # Get the OTel Collector pod IP (traffic blocking is per-source-IP so we only
 # affect the collector, not kubelet or Prometheus scraping from the hub)
-POD_IP=$(kubectl get pod -n observability -l app=otel-collector \
+POD_IP=$(kubectl get pod -n edge-obs -l app=otel-collector \
   -o jsonpath='{.items[0].status.podIP}' 2>/dev/null)
 
 if [ -z "$POD_IP" ]; then
@@ -40,7 +40,7 @@ echo -e "\n${RED}⚠️  Blocking OTel Collector (${POD_IP}) → hub backends...
 # backend the kernel's netfilter uses for the FORWARD chain.
 _drop() {
   local dport="$1"
-  kubectl exec -n observability "$CHAOS_POD" -- sh -c \
+  kubectl exec -n testing "$CHAOS_POD" -- sh -c \
     "iptables        -I FORWARD -s ${POD_IP} -p tcp --dport ${dport} -j DROP 2>/dev/null || true
      iptables-legacy -I FORWARD -s ${POD_IP} -p tcp --dport ${dport} -j DROP 2>/dev/null || true"
 }
@@ -53,7 +53,7 @@ _drop 3100   # Loki push
 # connections are not kept alive through the conntrack ESTABLISHED bypass.
 # Without this, in-flight long-lived connections survive the DROP rule.
 # Redirect stdout: conntrack -D prints each deleted entry, which is noisy.
-kubectl exec -n observability "$CHAOS_POD" -- \
+kubectl exec -n testing "$CHAOS_POD" -- \
   conntrack -D -s "$POD_IP" >/dev/null 2>&1 || true
 
 echo -e "\n${GREEN}✓ Network failure simulated (NO pod restart — collector keeps running)${NC}"
