@@ -270,7 +270,7 @@ akamas create workflow \
   akamas/workflow.yaml
 
 akamas create study \
-  --file akamas/study.yaml
+  akamas/study.yaml
 ```
 
 **3. Check the baseline before starting**
