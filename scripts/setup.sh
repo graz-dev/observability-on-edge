@@ -56,15 +56,20 @@ if [[ "$DEMO_ENV" == "local" ]]; then
   cd ..
   echo -e "${GREEN}✓ Application image built${NC}"
 
-  # Create k3d cluster with 2 nodes
-  echo -e "\n${YELLOW}☸️  Creating k3d cluster with 2 nodes...${NC}"
+  # Determine agent count: 3 when --akamas (dedicated load-test node), 2 otherwise
+  LOCAL_AGENTS=2
+  if [[ "$SETUP_AKAMAS" == "true" ]]; then
+    LOCAL_AGENTS=3
+  fi
+
+  echo -e "\n${YELLOW}☸️  Creating k3d cluster with ${LOCAL_AGENTS} nodes...${NC}"
 
   # Delete cluster if it exists
   k3d cluster delete edge-observability 2>/dev/null || true
 
-  # Create cluster with 2 agents (worker nodes)
+  # Create cluster with agents
   k3d cluster create edge-observability \
-    --agents 2 \
+    --agents "$LOCAL_AGENTS" \
     --port "30300:30300@server:0" \
     --port "30686:30686@server:0" \
     --wait
@@ -79,8 +84,8 @@ if [[ "$DEMO_ENV" == "local" ]]; then
   echo -e "\n${YELLOW}🏷️  Labeling nodes...${NC}"
   NODES=($(kubectl get nodes -o name | grep agent))
 
-  if [ ${#NODES[@]} -lt 2 ]; then
-    echo -e "${RED}❌ Expected 2 agent nodes, found ${#NODES[@]}${NC}"
+  if [ ${#NODES[@]} -lt "$LOCAL_AGENTS" ]; then
+    echo -e "${RED}❌ Expected ${LOCAL_AGENTS} agent nodes, found ${#NODES[@]}${NC}"
     exit 1
   fi
 
@@ -90,6 +95,11 @@ if [[ "$DEMO_ENV" == "local" ]]; then
   echo -e "${GREEN}✓ Nodes labeled${NC}"
   echo "  - ${NODES[0]} = edge"
   echo "  - ${NODES[1]} = hub"
+
+  if [[ "$SETUP_AKAMAS" == "true" ]]; then
+    kubectl label ${NODES[2]} node-role=load-test --overwrite
+    echo "  - ${NODES[2]} = load-test (dedicated Akamas k6 runner)"
+  fi
 
   # Import application image to k3d
   echo -e "\n${YELLOW}📦 Importing application image to k3d...${NC}"
@@ -165,8 +175,14 @@ if [[ "$DEMO_ENV" == "local" ]]; then
 # ── Civo path ────────────────────────────────────────────────
 else
 
+  # Determine node count: 3 when --akamas (dedicated load-test node), 2 otherwise
+  CIVO_NODES=2
+  if [[ "$SETUP_AKAMAS" == "true" ]]; then
+    CIVO_NODES=3
+  fi
+
   echo -e "\n${YELLOW}☸️  Creating Civo K3s cluster 'edge-observability'...${NC}"
-  echo "  Region: ${CIVO_REGION}  |  Size: ${CIVO_SIZE} (4 vCPU / 8 GB)  |  Nodes: 2"
+  echo "  Region: ${CIVO_REGION}  |  Size: ${CIVO_SIZE} (4 vCPU / 8 GB)  |  Nodes: ${CIVO_NODES}"
 
   # Delete cluster if it already exists (idempotent re-run)
   if civo kubernetes show edge-observability --region "$CIVO_REGION" &>/dev/null; then
@@ -177,7 +193,7 @@ else
   fi
 
   civo kubernetes create edge-observability \
-    --nodes 2 \
+    --nodes "$CIVO_NODES" \
     --size "$CIVO_SIZE" \
     --region "$CIVO_REGION" \
     --save --switch --wait
@@ -189,26 +205,26 @@ else
   # Wait for nodes to be Ready
   # Civo marks the cluster ACTIVE before nodes register in the K8s API.
   # kubectl wait --all fails with "no matching resources" on an empty node list,
-  # so first poll until at least 2 nodes appear, then wait for Ready.
+  # so first poll until at least N nodes appear, then wait for Ready.
   echo -e "\n${YELLOW}⏳ Waiting for nodes to register in the API...${NC}"
   for i in $(seq 1 36); do
     node_count=$(kubectl get nodes --no-headers 2>/dev/null | wc -l | tr -d ' ')
-    if [[ "$node_count" -ge 2 ]]; then
+    if [[ "$node_count" -ge "$CIVO_NODES" ]]; then
       echo -e "${GREEN}✓ ${node_count} node(s) registered${NC}"
       break
     fi
-    printf "  %d/2 nodes found, waiting... (%ds)\r" "$node_count" $(( i * 5 ))
+    printf "  %d/%d nodes found, waiting... (%ds)\r" "$node_count" "$CIVO_NODES" $(( i * 5 ))
     sleep 5
   done
   echo -e "\n${YELLOW}⏳ Waiting for nodes to be Ready...${NC}"
   kubectl wait --for=condition=Ready nodes --all --timeout=120s
 
-  # Label nodes automatically (first = edge, second = hub)
-  echo -e "\n${YELLOW}🏷️  Labeling nodes (first=edge, second=hub)...${NC}"
+  # Label nodes automatically (first=edge, second=hub, third=load-test if --akamas)
+  echo -e "\n${YELLOW}🏷️  Labeling nodes...${NC}"
   NODES=($(kubectl get nodes --no-headers -o custom-columns=NAME:.metadata.name))
 
-  if [ ${#NODES[@]} -lt 2 ]; then
-    echo -e "${RED}❌ Expected 2 nodes, found ${#NODES[@]}${NC}"
+  if [ ${#NODES[@]} -lt "$CIVO_NODES" ]; then
+    echo -e "${RED}❌ Expected ${CIVO_NODES} nodes, found ${#NODES[@]}${NC}"
     exit 1
   fi
 
@@ -217,6 +233,11 @@ else
   echo -e "${GREEN}✓ Nodes labeled${NC}"
   echo "  - ${NODES[0]} = edge"
   echo "  - ${NODES[1]} = hub"
+
+  if [[ "$SETUP_AKAMAS" == "true" ]]; then
+    kubectl label node "${NODES[2]}" node-role=load-test --overwrite
+    echo "  - ${NODES[2]} = load-test (dedicated Akamas k6 runner)"
+  fi
 
   # Pre-pull the custom OTel Collector image (Civo nodes pull directly from ghcr.io)
   echo -e "\n${YELLOW}📦 Pre-pulling OTel Collector image...${NC}"
@@ -332,6 +353,20 @@ else
       printf "  Waiting... (%ds)\r" $(( i * 10 ))
       sleep 10
     done
+
+    # Cap the Civo built-in OTel collector (kube-system) so it cannot consume
+    # unbounded CPU/memory during optimisation experiments.
+    # Civo deploys this DaemonSet automatically on every K3s cluster for its own
+    # telemetry; we cannot remove it, but we can limit its resource footprint to
+    # prevent it from introducing unpredictable noise in the collector measurements.
+    echo -e "\n${YELLOW}🔒 Capping Civo built-in OTel collector resources (kube-system)...${NC}"
+    kubectl patch daemonset otel-collector -n kube-system --type='json' -p='[
+      {"op": "add", "path": "/spec/template/spec/containers/0/resources", "value": {
+        "requests": {"cpu": "10m",  "memory": "64Mi"},
+        "limits":   {"cpu": "50m",  "memory": "128Mi"}
+      }}
+    ]' 2>/dev/null && echo -e "${GREEN}✓ Civo OTel collector capped at 50m CPU / 128Mi${NC}" \
+                    || echo -e "${YELLOW}⚠️  Could not patch Civo OTel collector (may not be present)${NC}"
 
     # Inject Grafana collector footprint dashboard
     echo -e "\n${YELLOW}📊 Injecting collector footprint dashboard into Grafana...${NC}"

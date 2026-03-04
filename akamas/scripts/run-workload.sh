@@ -10,7 +10,7 @@ export KUBECONFIG="${KUBECONFIG:-/work/kubeconfig}"
 
 set -euo pipefail
 
-NAMESPACE="${NAMESPACE:-observability}"
+NAMESPACE="${NAMESPACE:-testing}"
 TESTRUN_NAME="akamas-opt-workload"
 TIMEOUT_SECONDS=900   # 15 min hard timeout (test should finish in ~12.5 min)
 
@@ -45,7 +45,7 @@ spec:
     image: grafana/k6:latest
     imagePullPolicy: IfNotPresent
     nodeSelector:
-      node-role: edge
+      node-role: load-test
     env:
       - name: BASE_URL
         value: http://edge-demo-app.app.svc.cluster.local:8080

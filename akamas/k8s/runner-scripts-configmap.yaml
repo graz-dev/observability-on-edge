@@ -175,7 +175,7 @@ data:
         image: grafana/k6:latest
         imagePullPolicy: IfNotPresent
         nodeSelector:
-          node-role: edge
+          node-role: load-test
         env:
           - name: BASE_URL
             value: http://edge-demo-app.app.svc.cluster.local:8080

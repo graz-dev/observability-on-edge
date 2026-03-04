@@ -11,7 +11,7 @@ export KUBECONFIG="${KUBECONFIG:-/work/kubeconfig}"
 
 set -euo pipefail
 
-NAMESPACE="${NAMESPACE:-observability}"
+NAMESPACE="${NAMESPACE:-edge-obs}"
 
 # batch_send_max_size must be >= batch_send_size; use 2× as upper cap.
 BATCH_SEND_MAX_SIZE=$((BATCH_SEND_SIZE * 2))
@@ -73,7 +73,7 @@ data:
       tail_sampling:
         decision_wait: ${TAIL_DECISION_WAIT_S}s
         num_traces: ${TAIL_NUM_TRACES}
-        expected_new_traces_per_sec: 10
+        expected_new_traces_per_sec: 250
         policies:
           - name: error-policy
             type: status_code
