@@ -14,4 +14,4 @@ export GOGC="${collector.gogc}"
 export GOMEMLIMIT_MIB="${collector.gomemlimit_mib}"
 export GOMAXPROCS="${collector.gomaxprocs}"
 
-exec bash /work/observability-on-edge/akamas/scripts/apply-config.sh
+exec bash /work/code/observability-on-edge/akamas/scripts/apply-config.sh

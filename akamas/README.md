@@ -239,18 +239,7 @@ kubectl get svc prometheus -n hub-obs \
 The scripts expect the kubeconfig at `/work/kubeconfig` on the Akamas toolbox.
 The `KUBECONFIG` environment variable overrides this path if already set in the toolbox.
 
-```bash
-# Example: copy your local kubeconfig into the Akamas toolbox
-AKAMAS_POD=$(kubectl get pod -n akamas -l app=akamas -o jsonpath='{.items[0].metadata.name}')
-kubectl cp ~/.kube/config ${AKAMAS_POD}:/work/kubeconfig -n akamas
-```
-
 **5. Fill in the placeholder in the Akamas config files**
-
-```bash
-# telemetry-instance.yaml → Prometheus address
-sed -i 's/<PROMETHEUS_LB_IP>/1.2.3.4/g' akamas/telemetry-instance.yaml
-```
 
 ---
 
@@ -261,25 +250,24 @@ All commands use the `akamas` CLI against the server at `localhost:9000`.
 **1. Install the optimization pack**
 
 ```bash
-akamas build optimization-pack akamas/optimization-pack/
-akamas install optimization-pack descriptor.json
+akamas build op akamas/optimization-pack/
+akamas install op <optimization-pack-manifest>.json
 ```
 
 **2. Create the study resources**
 
 ```bash
 akamas create system \
-  --file akamas/system.yaml
+  akamas/system.yaml
 
 akamas create component \
-  --system edge-observability-stack \
-  --file akamas/component.yaml
+  akamas/component.yaml "<system-name>"
 
 akamas create telemetry-instance \
-  --file akamas/telemetry-instance.yaml
+  akamas/telemetry-instance.yaml "<system-name>"
 
 akamas create workflow \
-  --file akamas/workflow.yaml
+  akamas/workflow.yaml
 
 akamas create study \
   --file akamas/study.yaml
