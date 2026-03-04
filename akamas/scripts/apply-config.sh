@@ -19,13 +19,19 @@ BATCH_SEND_MAX_SIZE=$((BATCH_SEND_SIZE * 2))
 # GOMEMLIMIT must be in bytes for the Go runtime env var.
 GOMEMLIMIT_BYTES=$((GOMEMLIMIT_MIB * 1024 * 1024))
 
-echo "[apply-config] params:"
-echo "  batch: timeout=${BATCH_TIMEOUT_S}s size=${BATCH_SEND_SIZE} max=${BATCH_SEND_MAX_SIZE}"
-echo "  tail:  decision_wait=${TAIL_DECISION_WAIT_S}s num_traces=${TAIL_NUM_TRACES}"
-echo "  memlimiter: limit=${MEMORY_LIMIT_MIB}Mi spike=${MEMORY_SPIKE_MIB}Mi"
-echo "  go: GOGC=${GOGC} GOMEMLIMIT=${GOMEMLIMIT_MIB}Mi GOMAXPROCS=${GOMAXPROCS}"
+START_TS=$(date +%s)
+log() { echo "[apply-config] $(date '+%H:%M:%S') $*"; }
+
+log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+log "Parameters received from Akamas:"
+log "  batch:       timeout=${BATCH_TIMEOUT_S}s  send_size=${BATCH_SEND_SIZE}  max_size=${BATCH_SEND_MAX_SIZE}"
+log "  tail:        decision_wait=${TAIL_DECISION_WAIT_S}s  num_traces=${TAIL_NUM_TRACES}"
+log "  mem_limiter: limit=${MEMORY_LIMIT_MIB}Mi  spike=${MEMORY_SPIKE_MIB}Mi"
+log "  go runtime:  GOGC=${GOGC}  GOMEMLIMIT=${GOMEMLIMIT_MIB}Mi (${GOMEMLIMIT_BYTES}B)  GOMAXPROCS=${GOMAXPROCS}"
+log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # ── 1. Regenerate the collector ConfigMap ────────────────────────────────────
+log "Step 1/3 — applying ConfigMap otel-collector-config (namespace: ${NAMESPACE})..."
 kubectl apply -n "$NAMESPACE" -f - << EOF
 apiVersion: v1
 kind: ConfigMap
@@ -152,17 +158,22 @@ data:
           address: 0.0.0.0:8888
           level: detailed
 EOF
+log "  ✓ ConfigMap applied"
 
 # ── 2. Patch Go runtime env vars on the DaemonSet ───────────────────────────
+log "Step 2/3 — patching DaemonSet env vars (GOGC / GOMEMLIMIT / GOMAXPROCS)..."
 kubectl set env daemonset/otel-collector \
   -n "$NAMESPACE" \
   "GOGC=${GOGC}" \
   "GOMEMLIMIT=${GOMEMLIMIT_BYTES}" \
   "GOMAXPROCS=${GOMAXPROCS}"
+log "  ✓ Env vars patched"
 
 # ── 3. Restart and wait for rollout ─────────────────────────────────────────
-echo "[apply-config] restarting DaemonSet..."
+log "Step 3/3 — rollout restart DaemonSet (timeout: 120s)..."
 kubectl rollout restart daemonset/otel-collector -n "$NAMESPACE"
 kubectl rollout status daemonset/otel-collector -n "$NAMESPACE" --timeout=120s
 
-echo "[apply-config] collector is ready"
+ELAPSED=$(( $(date +%s) - START_TS ))
+log "  ✓ Collector is ready  (total: ${ELAPSED}s)"
+log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

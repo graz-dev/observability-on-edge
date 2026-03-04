@@ -28,7 +28,7 @@ tasks:
     operator: Executor
     arguments:
       retries: 0
-      timeout: 15m
+      timeout: 20m
       host:
         hostname: toolbox
         username: akamas
