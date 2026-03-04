@@ -336,12 +336,11 @@ else
   if [[ "$SETUP_AKAMAS" == "true" ]]; then
     echo -e "\n${YELLOW}🔬 Setting up Akamas optimisation runner...${NC}"
 
-    # Deploy Akamas-specific k8s resources (k6 optimisation script + runner scripts).
+    # Deploy Akamas-specific k8s resources (k6 optimisation script).
     # These are not part of the base overlay — they are only needed for Akamas.
     echo -e "\n${YELLOW}📦 Deploying Akamas k8s resources...${NC}"
     kubectl apply -f akamas/k8s/k6-optimization-configmap.yaml
-    kubectl apply -f akamas/k8s/runner-scripts-configmap.yaml
-    echo -e "${GREEN}✓ k6 optimisation ConfigMap and runner scripts deployed${NC}"
+    echo -e "${GREEN}✓ k6 optimisation ConfigMap deployed${NC}"
 
     # Expose Prometheus as LoadBalancer so the Akamas server (EKS) can scrape it.
     # Applied here and not in the base Civo overlay to avoid a public endpoint

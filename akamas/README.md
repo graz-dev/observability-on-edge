@@ -126,7 +126,6 @@ akamas/
 │   └── run-workload.sh     # Creates k6 TestRun and waits for completion
 │
 └── k8s/                    # Kubernetes resources to deploy in the Civo cluster
-    ├── runner-scripts-configmap.yaml  # apply-config.sh and run-workload.sh (copies in-cluster)
     └── k6-optimization-configmap.yaml # Shortened k6 script (8 min steady-state) for iterations
 ```
 
@@ -223,7 +222,6 @@ The `--akamas` flag automatically runs steps 1–3 below and prints the Promethe
 **2. Deploy the k6 optimisation ConfigMap**
 
 ```bash
-kubectl apply -f akamas/k8s/runner-scripts-configmap.yaml
 kubectl apply -f akamas/k8s/k6-optimization-configmap.yaml
 ```
 

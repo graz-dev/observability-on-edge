@@ -70,18 +70,21 @@ EOF
 log "  ✓ TestRun created"
 
 # ── 3. Wait for the runner pod to appear ────────────────────────────────────
-log "Step 3/4 — waiting for runner pod to be scheduled..."
-DEADLINE=$((SECONDS + 60))
+# The k6 operator creates an "initializer" pod first (validates script, ~10s),
+# then the actual runner pod(s). We must skip the initializer.
+log "Step 3/4 — waiting for runner pod to be scheduled (skipping initializer)..."
+DEADLINE=$((SECONDS + 120))
 POD=""
 while [[ $SECONDS -lt $DEADLINE ]]; do
   POD=$(kubectl get pod -n "$NAMESPACE" -l "k6_cr=${TESTRUN_NAME}" \
-        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+        -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null \
+        | grep -v "initializer" | head -1 || true)
   [[ -n "$POD" ]] && break
   sleep 3
 done
 
 if [[ -z "$POD" ]]; then
-  log "ERROR: runner pod did not appear within 60s"
+  log "ERROR: runner pod did not appear within 120s"
   exit 1
 fi
 
@@ -93,7 +96,7 @@ log "Step 4/4 — waiting for k6 test to complete (timeout: ${TIMEOUT_SECONDS}s)
 kubectl wait pod "$POD" \
   -n "$NAMESPACE" \
   --for=condition=Ready \
-  --timeout=30s 2>/dev/null || true
+  --timeout=60s 2>/dev/null || true
 
 kubectl wait pod "$POD" \
   -n "$NAMESPACE" \
