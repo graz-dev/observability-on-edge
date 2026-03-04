@@ -41,10 +41,10 @@ parameters:
   - name: tail_num_traces
     domain:
       type: integer
-      domain: [1000, 20000]
-    defaultValue: 10000
+      domain: [1000, 12000]
+    defaultValue: 5000
     operators:
-      FileConfigurator: 
+      FileConfigurator:
 
   # ── Memory limiter ──────────────────────────────────────────────────────────
   # Soft cap on process RSS.  When exceeded, the limiter starts refusing new
@@ -94,10 +94,10 @@ parameters:
   - name: gomaxprocs
     domain:
       type: integer
-      domain: [1, 4]
-    defaultValue: 2
+      domain: [1, 2]
+    defaultValue: 1
     operators:
-      FileConfigurator: 
+      FileConfigurator:
 
 metrics:
   - name: working_set_bytes

@@ -1,0 +1,77 @@
+kind: study
+system: edgeobservabilitystack
+workflow: collector-footprint-workflow
+name: collector-footprint-v2
+description: >
+  v2 — higher load (300 VUs), corrected formula, active constraints.
+
+  Objective: minimize composite score weighted ~60% memory + ~40% CPU.
+  Formula calibrated on observed baseline values (35 MB working set, ~12 mc CPU)
+  so both signals contribute proportionally.
+
+  SLO constraints: zero dropped OR refused spans / logs / metrics at all times.
+  Throughput guard: accepted_spans_rate >= 100 spans/s (detects catastrophic failures).
+
+goal:
+  name: minimize_footprint
+  objective: minimize
+  # memory_GB + 2 × cpu_cores ≈ 60 % memory / 40 % CPU at baseline load.
+  # At higher CPU load the ratio shifts toward CPU — acceptable for an edge scenario
+  # where memory pressure tends to be more critical than CPU for a DaemonSet.
+  function:
+    formula: ((collector.working_set_bytes / 1024 / 1024 / 1024) + (2 * collector.cpu_millicores / 1000))
+  constraints:
+    absolute:
+      - name: no_dropped_spans
+        formula: collector.dropped_spans <= 0
+      - name: no_refused_spans
+        formula: collector.refused_spans <= 0
+      - name: no_dropped_logs
+        formula: collector.dropped_logs <= 0
+      - name: no_dropped_metrics
+        formula: collector.dropped_metric_points <= 0
+      - name: throughput_stable
+        # At 300 VUs expect ~500+ spans/s. Threshold of 100 catches collector/app
+        # failures without false positives from normal load variance.
+        formula: collector.accepted_spans_rate >= 100
+
+parametersSelection:
+  - name: collector.batch_timeout_s
+  - name: collector.batch_send_size
+  - name: collector.tail_decision_wait_s
+  - name: collector.tail_num_traces
+  - name: collector.memory_limit_mib
+  - name: collector.memory_spike_mib
+  - name: collector.gogc
+  - name: collector.gomemlimit_mib
+  - name: collector.gomaxprocs
+
+parameterConstraints:
+  - name: gomemlimit_mib < pod_limit
+    formula: collector.gomemlimit_mib < collector.memory_limit_mib
+
+
+steps:
+  - name: baseline
+    type: baseline
+    # Starting point informed by v1 results:
+    #   - GOMAXPROCS=1 consistently best (less GC contention)
+    #   - GOGC=100 (middle ground — v1 found 200 optimal but at trivially low load)
+    #   - tail_num_traces=5000 (middle of new range, calibrated for 300 VUs)
+    #   - memory settings loosened from v1 extremes for a fair starting point
+    values:
+      collector.batch_timeout_s: 5
+      collector.batch_send_size: 512
+      collector.tail_decision_wait_s: 5
+      collector.tail_num_traces: 5000
+      collector.memory_limit_mib: 300
+      collector.memory_spike_mib: 60
+      collector.gogc: 100
+      collector.gomemlimit_mib: 250
+      collector.gomaxprocs: 1
+    numberOfTrials: 3
+
+  - name: optimise
+    type: optimize
+    numberOfExperiments: 150
+    maxFailedExperiments: 50

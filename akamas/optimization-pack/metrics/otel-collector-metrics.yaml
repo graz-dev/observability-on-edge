@@ -82,12 +82,12 @@ metrics:
   # Rate over the full measurement window for consistency with the CPU metric.
   - name: exported_spans_rate
     description: Spans successfully exported (rate/s over measurement window)
-    unit: percent
+    unit: spans/s
     #datasourceMetric: 'rate(otelcol_exporter_sent_spans{job=~"$JOB$" %FILTERS%}[$DURATION$])'
 
   # Accepted throughput at receiver — should be stable across experiments.
   # A significant drop signals the collector is rejecting load, not optimising it.
   - name: accepted_spans_rate
     description: Spans accepted by receiver (rate/s over measurement window)
-    unit: percent
+    unit: spans/s
     #datasourceMetric: 'rate(otelcol_receiver_accepted_spans{job=~"$JOB$" %FILTERS%}[$DURATION$])'

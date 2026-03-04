@@ -14,16 +14,17 @@ data:
     const slowDiagnostics = new Counter('slow_diagnostics');
     const latency       = new Trend('request_latency');
 
-    // Optimisation workload — heavier than the demo to fully exercise all
-    // tunable parameters, in particular the tail-sampler LRU map (tail_num_traces).
+    // Optimisation workload — 300 VUs to stress the collector meaningfully.
     //
-    // Why 100 VUs and tighter sleep on fast endpoints?
-    //   tail_num_traces range: 1 000 – 20 000.
-    //   To put 1 000 traces in flight simultaneously (lower bound of the range):
-    //     needed rate = 1 000 / decision_wait(5s) = 200 traces/s.
-    //   At 8 VUs (demo load) the app generates ~5 traces/s → only ~25 in flight.
-    //   At 100 VUs with 0.1–0.5s fast-endpoint sleep → ~255 traces/s → ~1 275 in
-    //   flight at default decision_wait, which covers the meaningful part of the range.
+    // Why 300 VUs?
+    //   tail_num_traces range: 1 000 – 12 000.
+    //   Fast VUs (88% of 300 = 264) with 0.1–0.5 s sleep → ~880 traces/s.
+    //   At decision_wait=5s: ~4 400 traces in flight simultaneously.
+    //   At decision_wait=10s: ~8 800 traces in flight.
+    //   Range [1 000, 12 000] covers the meaningful spectrum:
+    //     1 000 → heavy LRU eviction → high CPU, wrong decisions
+    //    12 000 → comfortable headroom at max decision_wait
+    //   CPU is also meaningfully stressed: ~50–300 millicores vs ~5–15 at 100 VUs.
     //
     // Traffic mix is identical to the demo (same scenario, higher concurrency):
     //   50% engine sensors  — fast (~50 ms),   sleep 0.1–0.5 s (rapid polling)
@@ -32,18 +33,18 @@ data:
     //    8% system alerts   — error-prone,     sleep 0.1–0.5 s
     //
     // Ramp shape:
-    //   30s → 20 VU  (cluster warm-up)
-    //   30s → 50 VU  (intermediate ramp)
-    //    1m → 100 VU (reach full load)
-    //   10m @ 100 VU (steady state — Prometheus measurement window, duration: 600)
-    //   30s → 0 VU   (ramp-down)
+    //   30s →  60 VU  (cluster warm-up)
+    //   30s → 150 VU  (intermediate ramp)
+    //    1m → 300 VU  (reach full load)
+    //   10m @ 300 VU  (steady state — Prometheus measurement window, duration: 600)
+    //   30s →   0 VU  (ramp-down)
     //   Total ≈ 12.5 min workload + ~90 s collector restart = ~14 min/experiment
     export const options = {
       stages: [
-        { duration: '30s', target: 20  },
-        { duration: '30s', target: 50  },
-        { duration: '1m',  target: 100 },
-        { duration: '10m', target: 100 },
+        { duration: '30s', target: 60  },
+        { duration: '30s', target: 150 },
+        { duration: '1m',  target: 300 },
+        { duration: '10m', target: 300 },
         { duration: '30s', target: 0   },
       ],
       thresholds: {
