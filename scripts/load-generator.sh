@@ -81,7 +81,7 @@ RUNNER_POD=$(kubectl get pods -n "${NAMESPACE}" -l "k6_cr=${TESTRUN_NAME}" \
 
 echo ""
 echo -e "${GREEN}✅ Load test running${NC}"
-echo "   TestRun:    ${TESTRUN_NAME} (40 min, 8 VU sustained)"
+echo "   TestRun:    ${TESTRUN_NAME} (40 min steady-state, 500 VU, ~2 500 spans/s)"
 echo "   Runner pod: ${RUNNER_POD:-<starting>}"
 echo ""
 echo -e "${YELLOW}📊 Monitor:${NC}"

@@ -145,16 +145,18 @@ if [[ "$DEMO_ENV" == "local" ]]; then
   echo -e "${GREEN}✓ Resources applied${NC}"
 
   echo -e "\n${YELLOW}⏳ Waiting for hub components to be ready...${NC}"
-  kubectl wait --for=condition=ready pod -l app=jaeger -n hub-obs --timeout=300s
-  kubectl wait --for=condition=ready pod -l app=prometheus -n hub-obs --timeout=300s
-  kubectl wait --for=condition=ready pod -l app=loki -n hub-obs --timeout=300s
-  kubectl wait --for=condition=ready pod -l app=grafana -n hub-obs --timeout=300s
+  # Use rollout status (works even before the first pod is scheduled, unlike
+  # 'kubectl wait --for=condition=ready pod -l ...' which errors on no-match).
+  kubectl rollout status deployment/jaeger     -n hub-obs --timeout=300s
+  kubectl rollout status deployment/prometheus -n hub-obs --timeout=300s
+  kubectl rollout status deployment/loki       -n hub-obs --timeout=300s
+  kubectl rollout status deployment/grafana    -n hub-obs --timeout=300s
   echo -e "${GREEN}✓ Hub components ready${NC}"
 
   echo -e "\n${YELLOW}⏳ Waiting for edge components to be ready...${NC}"
-  kubectl wait --for=condition=ready pod -l app=otel-collector -n edge-obs --timeout=300s
-  kubectl wait --for=condition=ready pod -l app=edge-demo-app -n app --timeout=180s
-  kubectl wait --for=condition=ready pod -l app=network-chaos -n testing --timeout=120s
+  kubectl rollout status daemonset/otel-collector  -n edge-obs --timeout=300s
+  kubectl rollout status deployment/edge-demo-app  -n app      --timeout=180s
+  kubectl rollout status daemonset/network-chaos   -n testing  --timeout=120s
   echo -e "${GREEN}✓ Edge components ready (including network-chaos)${NC}"
 
   # Display cluster information
@@ -263,10 +265,10 @@ else
   echo -e "${GREEN}✓ Resources applied${NC}"
 
   echo -e "\n${YELLOW}⏳ Waiting for hub components to be ready...${NC}"
-  kubectl wait --for=condition=ready pod -l app=jaeger -n hub-obs --timeout=300s
-  kubectl wait --for=condition=ready pod -l app=prometheus -n hub-obs --timeout=300s
-  kubectl wait --for=condition=ready pod -l app=loki -n hub-obs --timeout=300s
-  kubectl wait --for=condition=ready pod -l app=grafana -n hub-obs --timeout=300s
+  kubectl rollout status deployment/jaeger     -n hub-obs --timeout=300s
+  kubectl rollout status deployment/prometheus -n hub-obs --timeout=300s
+  kubectl rollout status deployment/loki       -n hub-obs --timeout=300s
+  kubectl rollout status deployment/grafana    -n hub-obs --timeout=300s
   echo -e "${GREEN}✓ Hub components ready${NC}"
 
   # On Civo, the otel-collector PVC uses local-path (WaitForFirstConsumer):
@@ -285,9 +287,9 @@ else
   done
 
   echo -e "\n${YELLOW}⏳ Waiting for edge components to be ready...${NC}"
-  kubectl wait --for=condition=ready pod -l app=otel-collector -n edge-obs --timeout=600s
-  kubectl wait --for=condition=ready pod -l app=edge-demo-app -n app --timeout=180s
-  kubectl wait --for=condition=ready pod -l app=network-chaos -n testing --timeout=120s
+  kubectl rollout status daemonset/otel-collector  -n edge-obs --timeout=600s
+  kubectl rollout status deployment/edge-demo-app  -n app      --timeout=180s
+  kubectl rollout status daemonset/network-chaos   -n testing  --timeout=120s
   echo -e "${GREEN}✓ Edge components ready (including network-chaos)${NC}"
 
   # Wait for LoadBalancer IPs (Civo assigns them within ~60s)
