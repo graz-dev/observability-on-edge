@@ -168,12 +168,13 @@ scripts/setup.sh                           # Adds --akamas flag
 ### Objective function (to minimise)
 
 ```
-score = 0.6 × (working_set_bytes / 100_000_000) + 0.4 × (cpu_millicores / 80)
+score = (working_set_bytes / 1_073_741_824) + (2 × cpu_millicores / 1_000)
+      = working_set_GB + 2 × cpu_cores
 ```
 
-**Memory signal**: `container_memory_working_set_bytes` (cAdvisor) — what `kubectl top` and the K8s OOM killer use. Preferred over `otelcol_process_memory_rss` because Go 1.12+ releases freed heap pages with `MADV_FREE`, causing RSS to remain inflated after GC until the OS needs the memory back. Working set excludes those pages and accurately reflects actual footprint.
+This expresses memory in GB and CPU in cores (×2 to match the edge-node weighting where memory pressure is the tighter constraint on a DaemonSet). At the measured baseline (~52 MB working set, ~50 mc CPU) the two terms contribute roughly equally to the score (~0.048 + ~0.100 = 0.148).
 
-The divisors normalise both signals against the measured baseline (≈ 100 MB working set, ≈ 80 millicores). **Update these values** after running the baseline step and checking the actual numbers in Grafana.
+**Memory signal**: `container_memory_working_set_bytes` (cAdvisor) — what `kubectl top` and the K8s OOM killer use. Preferred over `otelcol_process_memory_rss` because Go 1.12+ releases freed heap pages with `MADV_FREE`, causing RSS to remain inflated after GC until the OS needs the memory back. Working set excludes those pages and accurately reflects actual footprint.
 
 ### Safety KPIs (must not be violated)
 
@@ -287,8 +288,8 @@ The study runs in two phases:
 
 | Phase | Type | Duration |
 |-------|------|----------|
-| `baseline` | 1 experiment with current values | ≈ 14 min |
-| `optimise` | 60 Bayesian experiments (SOBOL) | ≈ 14 h |
+| `baseline` | 1 experiment with current values (3 trials) | ≈ 42 min |
+| `optimise` | 150 Bayesian experiments (SOBOL) | ≈ 35 h |
 
 **No interaction is required during the 60 experiments.** At the end Akamas presents the optimal configuration found. With `onlineMode: RECOMMEND` (set in `study.yaml`) you decide whether to adopt it.
 
@@ -410,7 +411,97 @@ Before launching the optimisation, confirm the following in Grafana:
 The workflow restarts the collector every ≈ 11 minutes. Do not run the KubeCon demo while the study is active.
 
 **Recovery from a failed experiment.**
-If an experiment fails for infrastructural reasons (Civo network instability, pod eviction), Akamas counts it against `maxFailedExperiments`. With `maxFailedExperiments: 15` the study tolerates up to 15 failures before aborting.
+If an experiment fails for infrastructural reasons (Civo network instability, pod eviction), Akamas counts it against `maxFailedExperiments`. With `maxFailedExperiments: 50` the study tolerates up to 50 failures before aborting.
 
 **Prometheus LoadBalancer and security.**
 The Prometheus LoadBalancer is publicly exposed on Civo (port 9090, no authentication). Use it only during the study; remove the `overlays/civo/patches/prometheus-lb.yaml` patch from the kustomization when it is no longer needed.
+
+---
+
+## Findings
+
+This section documents the results of the `collector-footprint-v3` study (90 completed optimization experiments out of 150 planned, plus the baseline step with 3 trials).
+
+### Study summary
+
+| | Value |
+|--|--|
+| Baseline experiments | 1 (3 trials) |
+| Optimization experiments completed | 90 |
+| Experiments with constraint violations | 1 (Exp 84) |
+| Best improvement over baseline | **−39.9%** composite score |
+| Best experiment | Exp 38 |
+
+### Baseline vs best result
+
+| Metric | Baseline (avg of trials 2–3) | Best (Exp 38) | Change |
+|--------|------------------------------|---------------|--------|
+| Working set memory | ~52 MB | ~39 MB | **−25%** |
+| CPU usage | ~50 mc | ~24 mc | **−52%** |
+| Composite score | ~0.149 | 0.0864 | **−42%** |
+| Dropped / refused signals | 0 | 0 | ✓ |
+
+The baseline trial 1 produced a lower score (0.133) due to collector warm-up; trials 2–3 (score ~0.149) reflect the true steady state.
+
+### What the optimizer found
+
+The study converged clearly on three parameters. Everything else had a relatively small or inconsistent effect.
+
+#### 1. `tail_num_traces` → always 1 000 (minimum of the range)
+
+This is the single biggest driver. The tail-sampler holds one in-memory entry per active trace in its LRU map. At baseline `tail_num_traces = 5 000`, the map can hold 5 000 trace entries simultaneously; at the minimum `1 000`, it holds 80% fewer.
+
+At 100 VUs the app generates ~255 traces/s. With `tail_decision_wait_s = 10`, up to ~2 550 traces could be in-flight at once. Because the LRU can only hold 1 000 entries, ~1 550 get evicted immediately and exported without a sampling decision (they are counted as "sampled = true" by the processor). This increases the raw export rate slightly, but critically it keeps the in-memory buffer tiny — which is the direct cause of the ~13 MB working-set reduction.
+
+The SLO (zero dropped/refused signals) is still satisfied because evicted traces are exported, not dropped.
+
+#### 2. `gogc` → always 200 (maximum of the range)
+
+At baseline `gogc = 100` (Go's default), the GC triggers a collection cycle when the live heap doubles. At `gogc = 200` it waits until the heap triples, so GC runs roughly half as often. This cuts CPU spent on garbage collection by ~50%, which explains the ~26 mc CPU reduction.
+
+The risk with a higher GOGC is that the heap grows larger between GC cycles. Here the risk is capped by `GOMEMLIMIT`, which forces aggressive GC regardless of GOGC when the Go heap approaches the configured ceiling. With a small working set (~39 MB), that ceiling is never approached in normal operation, so GOGC=200 reduces CPU without any memory penalty.
+
+#### 3. `gomaxprocs` → always 1
+
+This was already at the optimal value in the baseline. Every experiment with `gomaxprocs = 2` performed worse: the additional OS thread increases scheduling overhead and cache pressure without providing useful parallelism at this load level (single gRPC receiver + three pipeline goroutines). The only `CONSTRAINTS_VIOLATED` experiment (Exp 84) used `gomaxprocs = 2` combined with a tight memory limit, which caused both refused spans (1 175) and dropped spans (177) due to combined memory pressure.
+
+#### 4. `tail_decision_wait_s` → tends toward 10 (maximum)
+
+Counter-intuitive alongside `tail_num_traces = 1 000`: a longer wait should mean more in-flight traces, which should mean more LRU evictions and higher memory. In practice, once `tail_num_traces = 1 000` is set, the LRU immediately evicts anything beyond 1 000 entries regardless of the wait window. Increasing the wait to 10 s therefore does not add memory, and it actually improves sampling accuracy for the traces that do fit in the map (more spans arrive before a decision is made).
+
+#### 5. `batch_send_size`, `batch_timeout_s` — not critical
+
+The top 10 experiments span the full range on both parameters (batch_send_size from 128 to 2 048, batch_timeout_s from 1 to 10 s) with essentially the same score. The batch processor's contribution to working-set memory is small compared to the tail-sampler LRU, so the optimiser did not converge here. Either end of the range is safe.
+
+#### 6. `memory_limit_mib`, `memory_spike_mib`, `gomemlimit_mib` — not critical at low footprint
+
+With working set at ~39 MB and RSS at ~61 MB, any `memory_limit_mib ≥ 128` provides a safe margin below the K8s container limit (512 Mi). The optimiser explored tight values (128 Mi) and loose values (450 Mi) equally in the top results. Similarly, `gomemlimit_mib` in the range 100–380 Mi showed no meaningful difference once `tail_num_traces = 1 000` and `gogc = 200` were set.
+
+### Experiments that performed poorly
+
+| Experiment | Score | Key parameters | Why it was bad |
+|-----------|-------|----------------|----------------|
+| Exp 31 | 0.194 (−35%) | `tail_num_traces=12 000`, `gogc=50`, `gomaxprocs=1` | `gogc=50` triggered GC twice as often → 72 mc CPU. Large LRU added memory. |
+| Exp 32 | 0.184 (−28%) | `tail_num_traces=12 000`, `tail_decision_wait_s=10`, `memory_limit_mib=128` | Large LRU map → 84 MB working set. Tight memory limit caused the limiter to activate. |
+| Exp 9 | 0.185 (−28%) | `tail_num_traces=7 188`, `gomaxprocs=2` | High LRU + extra OS thread → 60 mc CPU + 70 MB working set. |
+| Exp 84 ⚠️ | 0.152 (VIOLATED) | `tail_num_traces=12 000`, `gomaxprocs=2`, `memory_limit_mib=128` | Only constraint-violated experiment. RSS exceeded the tight limit → 1 175 refused spans + 177 dropped spans. |
+
+The common pattern in failing or poor experiments is a **large `tail_num_traces`** (≥ 5 000). This is the dominant factor; poor `gogc` or `gomaxprocs` values amplify the problem but are secondary.
+
+### Recommended configuration
+
+Based on the consistent convergence across the top 10 experiments:
+
+| Parameter | Baseline | Recommended | Reason |
+|-----------|---------|-------------|--------|
+| `tail_num_traces` | 5 000 | **1 000** | Largest single memory saving (~13 MB) |
+| `tail_decision_wait_s` | 5 s | **10 s** | Better sampling accuracy; no memory cost at low LRU |
+| `gogc` | 100 | **200** | ~50% less GC-related CPU overhead |
+| `gomaxprocs` | 1 | **1** | Already optimal; do not increase |
+| `memory_limit_mib` | 300 Mi | **200 Mi** | Safe margin above observed RSS (~61 MB); can go as low as 128 Mi |
+| `memory_spike_mib` | 60 Mi | **20 Mi** | Spike headroom; RSS is stable at low footprint |
+| `gomemlimit_mib` | 250 Mi | **150 Mi** | Soft Go heap ceiling; lower is fine at small footprint |
+| `batch_send_size` | 512 | 128–2 048 | No significant impact; keep at 512 or lower for lower per-batch heap |
+| `batch_timeout_s` | 5 s | 1–5 s | No significant impact; shorter = faster export latency |
+
+> **Caveat:** These values were measured at 100 VUs (optimisation workload). The demo runs at 8 VUs, which generates ~5 traces/s. At that rate `tail_num_traces = 1 000` holds all in-flight traces with no evictions, which is even safer. However, `memory_limit_mib = 128` is a tight ceiling; if future demo load increases significantly, raise it to 200 Mi to avoid any risk of back-pressure refusals.
