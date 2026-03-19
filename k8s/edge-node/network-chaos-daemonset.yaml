@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: network-chaos
-  namespace: observability
+  namespace: testing
   labels:
     app: network-chaos
 spec:

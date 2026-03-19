@@ -24,7 +24,7 @@ export const options = {
   },
 };
 
-const BASE_URL = __ENV.BASE_URL || 'http://edge-demo-app.observability.svc.cluster.local:8080';
+const BASE_URL = __ENV.BASE_URL || 'http://edge-demo-app.app.svc.cluster.local:8080';
 
 // Simulate different maritime monitoring patterns
 export default function () {

@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: grafana-dashboards
-  namespace: observability
+  namespace: hub-obs
   labels:
     grafana_dashboard: "1"
 data:
@@ -186,9 +186,59 @@ data:
           "title": "Latency P50/P95 by Endpoint",
           "type": "timeseries"
         },
+
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 12},
+          "id": 8,
+          "title": "TRACE CORRELATION — click ◆ on a spike to open the trace in Jaeger",
+          "type": "row"
+        },
+
+        {
+          "datasource": "Prometheus",
+          "description": "Average latency of sampled traces only (errors + slow requests >200ms that passed tail-sampling). The line shows the running average; each ◆ diamond is a single real trace at its actual measured duration — click it to open that exact trace in Jaeger. All diamonds are guaranteed ≥200ms because fast healthy requests are dropped by tail sampling before reaching here.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineWidth": 2,
+                "lineInterpolation": "smooth",
+                "showPoints": "never"
+              },
+              "unit": "ms",
+              "min": 0
+            }
+          },
+          "gridPos": {"h": 10, "w": 24, "x": 0, "y": 13},
+          "id": 9,
+          "options": {
+            "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.50, sum(rate(traces_duration_milliseconds_bucket{http_route!=\"\"}[1m])) by (le, http_route))",
+              "legendFormat": "{{http_route}} P50",
+              "refId": "A",
+              "exemplar": true
+            },
+            {
+              "expr": "sum(rate(traces_duration_milliseconds_sum{http_route!=\"\"}[1m])) by (http_route) / sum(rate(traces_duration_milliseconds_count{http_route!=\"\"}[1m])) by (http_route)",
+              "legendFormat": "{{http_route}} avg",
+              "refId": "B",
+              "exemplar": false
+            }
+          ],
+          "title": "Sampled Request Latency — ◆=individual trace (click to open in Jaeger)",
+          "type": "timeseries"
+        },
+
         {
           "datasource": "Loki",
-          "gridPos": {"h": 10, "w": 24, "x": 0, "y": 12},
+          "gridPos": {"h": 10, "w": 24, "x": 0, "y": 24},
           "id": 7,
           "options": {
             "dedupStrategy": "none",
@@ -429,8 +479,48 @@ data:
         },
 
         {
+          "datasource": "Prometheus",
+          "description": "Call rate per endpoint, computed from sampled traces (errors + slow requests >200ms). Each ◆ diamond marker carries a trace_id — click it to jump directly to that trace in Jaeger. Only sampled traffic appears here; fast healthy requests are dropped by tail sampling.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 15,
+                "lineWidth": 2,
+                "lineInterpolation": "smooth",
+                "showPoints": "never"
+              },
+              "unit": "reqps"
+            }
+          },
+          "gridPos": {"h": 7, "w": 24, "x": 0, "y": 15},
+          "id": 14,
+          "options": {
+            "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "expr": "sum(rate(traces_calls_total{status_code=\"STATUS_CODE_ERROR\",http_route!=\"\"}[1m])) by (http_route)",
+              "legendFormat": "{{http_route}} errors",
+              "refId": "A",
+              "exemplar": true
+            },
+            {
+              "expr": "sum(rate(traces_calls_total{status_code!=\"STATUS_CODE_ERROR\",http_route!=\"\"}[1m])) by (http_route)",
+              "legendFormat": "{{http_route}} slow",
+              "refId": "B",
+              "exemplar": true
+            }
+          ],
+          "title": "Sampled Calls by Endpoint — click ◆ to open trace in Jaeger",
+          "type": "timeseries"
+        },
+
+        {
           "collapsed": false,
-          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 15},
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 22},
           "id": 200,
           "title": "RESILIENCE — what happens when the satellite link goes down",
           "type": "row"
@@ -463,7 +553,7 @@ data:
               }
             ]
           },
-          "gridPos": {"h": 8, "w": 16, "x": 0, "y": 16},
+          "gridPos": {"h": 8, "w": 16, "x": 0, "y": 23},
           "id": 20,
           "options": {
             "legend": {"calcs": ["max", "mean"], "displayMode": "table", "placement": "bottom"},
@@ -502,7 +592,7 @@ data:
               "unit": "short"
             }
           },
-          "gridPos": {"h": 4, "w": 8, "x": 16, "y": 16},
+          "gridPos": {"h": 4, "w": 8, "x": 16, "y": 23},
           "id": 21,
           "options": {"colorMode": "background", "graphMode": "none", "reduceOptions": {"calcs": ["lastNotNull"]}},
           "targets": [{
@@ -538,7 +628,7 @@ data:
               "min": 0
             }
           },
-          "gridPos": {"h": 6, "w": 8, "x": 16, "y": 20},
+          "gridPos": {"h": 6, "w": 8, "x": 16, "y": 27},
           "id": 22,
           "options": {
             "tooltip": {"mode": "single"},
@@ -555,7 +645,7 @@ data:
 
         {
           "collapsed": false,
-          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 24},
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 31},
           "id": 300,
           "title": "COLLECTOR FOOTPRINT — resource usage on the edge node",
           "type": "row"
@@ -589,7 +679,7 @@ data:
               }
             ]
           },
-          "gridPos": {"h": 7, "w": 24, "x": 0, "y": 25},
+          "gridPos": {"h": 7, "w": 24, "x": 0, "y": 32},
           "id": 30,
           "options": {
             "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},

@@ -1,0 +1,36 @@
+kind: workflow
+name: collector-footprint-workflow
+tasks:
+  - name: Config values file
+    operator: FileConfigurator
+    arguments:
+      source:
+        hostname: toolbox
+        username: akamas
+        key: /home/akamas/.ssh/id_rsa
+        path: /work/code/observability-on-edge/akamas/template/template.sh
+      target:
+        hostname: toolbox
+        username: akamas
+        key: /home/akamas/.ssh/id_rsa
+        path: /work/code/observability-on-edge/akamas/template/final.sh
+  - name: Apply Config
+    operator: Executor
+    arguments:
+      retries: 0
+      timeout: 15m
+      host:
+        hostname: toolbox
+        username: akamas
+        key: /home/akamas/.ssh/id_rsa
+      command: bash /work/code/observability-on-edge/akamas/template/final.sh
+  - name: Run Workload
+    operator: Executor
+    arguments:
+      retries: 0
+      timeout: 20m
+      host:
+        hostname: toolbox
+        username: akamas
+        key: /home/akamas/.ssh/id_rsa
+      command: bash /work/code/observability-on-edge/akamas/scripts/run-workload.sh

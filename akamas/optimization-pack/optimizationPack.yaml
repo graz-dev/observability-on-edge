@@ -1,0 +1,7 @@
+name: OtelCollectorEdge
+description: Optimization pack for the OpenTelemetry Collector running on edge nodes.
+  Tunes batch processor, tail-sampling, memory limiter, and Go runtime parameters
+  to minimize memory RSS and CPU usage while preserving zero-drop guarantees.
+version: 0.1.0
+tags: [OpenTelemetry, Collector, Edge, Go, Observability]
+weight: 1

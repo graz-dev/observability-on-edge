@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: jaeger
-  namespace: observability
+  namespace: hub-obs
   labels:
     app: jaeger
     component: tracing
@@ -46,10 +46,10 @@ spec:
           name: http
         resources:
           requests:
-            memory: "256Mi"
+            memory: "512Mi"
             cpu: "200m"
           limits:
-            memory: "1Gi"
+            memory: "2Gi"
             cpu: "1000m"
         volumeMounts:
         - name: storage

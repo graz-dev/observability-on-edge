@@ -2,27 +2,37 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: k6-script
-  namespace: observability
+  namespace: testing
 data:
   k6-script.js: |
     import http from 'k6/http';
     import { check, sleep } from 'k6';
     import { Counter, Rate, Trend } from 'k6/metrics';
 
-    // Custom metrics
-    const errorRate = new Rate('errors');
-    const sensorErrors = new Counter('sensor_errors');
+    const errorRate     = new Rate('errors');
+    const sensorErrors  = new Counter('sensor_errors');
     const slowDiagnostics = new Counter('slow_diagnostics');
-    const latency = new Trend('request_latency');
+    const latency       = new Trend('request_latency');
 
-    // Test configuration - simulates vessel monitoring patterns
-    // Duration: 40 min total — covers the full 25-min live demo + buffer.
-    // Runs inside the cluster on the edge node via k6 Operator (TestRun CR).
+    // High-load demo workload — matches the Akamas optimisation workload intensity.
+    //
+    // 500 VUs × 0.1–0.5s sleep on fast endpoints → ~500 traces/s → ~2 500 spans/s
+    // into the OTel Collector tail sampler.
+    //
+    // Traffic mix:
+    //   50% engine sensors  — ~70–110 ms
+    //   30% navigation      — ~55–90 ms
+    //   12% diagnostics     — ~350–700 ms (up to 1 500 ms), own 2–7s sleep
+    //    8% system alerts   — ~80–140 ms, 20% error rate
+    //
+    // Duration: 40 min total — covers the full demo (all 3 acts) with buffer.
     export const options = {
       stages: [
-        { duration: '30s', target: 5 },   // Startup: systems coming online
-        { duration: '39m', target: 8 },   // Sustained: covers full demo + buffer
-        { duration: '30s', target: 0 },   // Shutdown
+        { duration: '30s', target: 100 },  // cluster warm-up
+        { duration: '30s', target: 250 },  // intermediate ramp
+        { duration: '1m',  target: 500 },  // reach full load
+        { duration: '40m', target: 500 },  // steady state — full demo window
+        { duration: '30s', target: 0   },  // ramp-down
       ],
       thresholds: {
         'http_req_duration': ['p(95)<600'],
@@ -30,9 +40,8 @@ data:
       },
     };
 
-    const BASE_URL = __ENV.BASE_URL || 'http://edge-demo-app.observability.svc.cluster.local:8080';
+    const BASE_URL = __ENV.BASE_URL || 'http://edge-demo-app.app.svc.cluster.local:8080';
 
-    // Simulate different maritime monitoring patterns
     export default function () {
       const scenario = Math.random();
 
@@ -42,11 +51,13 @@ data:
         monitorNavigation();
       } else if (scenario < 0.92) {
         runDiagnostics();
+        return;  // runDiagnostics has its own longer sleep
       } else {
         checkAlerts();
       }
 
-      sleep(Math.random() * 2 + 0.5); // 0.5-2.5 seconds
+      // Tight sleep on fast endpoints: vessels poll sensors at high frequency.
+      sleep(Math.random() * 0.4 + 0.1);
     }
 
     function monitorEngine() {
@@ -55,7 +66,7 @@ data:
       const duration = Date.now() - startTime;
       const success = check(res, {
         'engine sensors status is 200': (r) => r.status === 200,
-        'engine read time < 150ms': (r) => r.timings.duration < 150,
+        'engine read time < 150ms':     (r) => r.timings.duration < 150,
       });
       errorRate.add(!success);
       latency.add(duration);
@@ -68,7 +79,7 @@ data:
       const duration = Date.now() - startTime;
       const success = check(res, {
         'navigation sensors status is 200': (r) => r.status === 200,
-        'navigation read time < 120ms': (r) => r.timings.duration < 120,
+        'navigation read time < 120ms':     (r) => r.timings.duration < 120,
       });
       errorRate.add(!success);
       latency.add(duration);
@@ -80,13 +91,13 @@ data:
       const res = http.get(`${BASE_URL}/api/analytics/diagnostics`);
       const duration = Date.now() - startTime;
       const success = check(res, {
-        'diagnostics completed': (r) => r.status === 200,
+        'diagnostics completed':     (r) => r.status === 200,
         'diagnostics time < 1500ms': (r) => r.timings.duration < 1500,
       });
       errorRate.add(!success);
       latency.add(duration);
       if (duration > 500) slowDiagnostics.add(1);
-      sleep(Math.random() * 5 + 2); // extra 2-7s between diagnostic runs
+      sleep(Math.random() * 5 + 2);  // 2–7 s — complex operation
     }
 
     function checkAlerts() {
@@ -103,19 +114,17 @@ data:
     }
 
     export function handleSummary(data) {
-      return { 'stdout': textSummary(data, { indent: ' ', enableColors: true }) };
-    }
-
-    function textSummary(data, options) {
-      const indent = options.indent || '';
+      const d = data.metrics;
       let s = '\n';
-      s += `${indent}✓ Maritime Vessel Monitoring Load Test Complete\n`;
-      s += `${indent}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-      s += `${indent}  HTTP Reqs:  ${data.metrics.http_reqs.values.count} total\n`;
-      s += `${indent}  Duration:   ${Math.round(data.state.testRunDurationMs / 1000)}s\n`;
-      s += `${indent}  Avg:        ${Math.round(data.metrics.http_req_duration.values.avg)}ms\n`;
-      s += `${indent}  P95:        ${Math.round(data.metrics.http_req_duration.values['p(95)'])}ms\n`;
-      s += `${indent}  Error Rate: ${(data.metrics.errors.values.rate * 100).toFixed(2)}%\n`;
-      s += `${indent}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
-      return s;
+      s += ' Maritime Vessel Monitoring — High-Load Demo Complete\n';
+      s += ' ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
+      s += ` HTTP Reqs:            ${d.http_reqs.values.count} total\n`;
+      s += ` Duration:             ${Math.round(data.state.testRunDurationMs / 1000)}s\n`;
+      s += ` Avg latency:          ${Math.round(d.http_req_duration.values.avg)}ms\n`;
+      s += ` P95 latency:          ${Math.round(d.http_req_duration.values['p(95)'])}ms\n`;
+      s += ` Error rate:           ${(d.errors.values.rate * 100).toFixed(2)}%\n`;
+      s += ` Slow requests >200ms: ${d.slow_diagnostics ? d.slow_diagnostics.values.count : 'n/a'}\n`;
+      s += ` Sensor comm errors:   ${d.sensor_errors ? d.sensor_errors.values.count : 'n/a'}\n`;
+      s += ' ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
+      return { stdout: s };
     }

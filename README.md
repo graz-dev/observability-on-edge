@@ -208,7 +208,7 @@ Observability is only actionable when the three signal types can be navigated to
 
 **How correlation is implemented here:**
 
-1. **Trace context propagation:** The demo app creates an OpenTelemetry span for every incoming HTTP request. The span's `trace_id` and `span_id` are extracted and injected into every structured log line via the [zap](https://github.com/uber-go/zap) logger. Log format:
+1. **Trace context propagation (traces → logs):** The demo app creates an OpenTelemetry span for every incoming HTTP request. The span's `trace_id` and `span_id` are extracted and injected into every structured log line via the [zap](https://github.com/uber-go/zap) logger. Log format:
    ```json
    {"timestamp":"2025-01-15T10:23:45Z","level":"error","msg":"request failed",
     "trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","span_id":"00f067aa0ba902b7",
@@ -217,13 +217,18 @@ Observability is only actionable when the three signal types can be navigated to
 
 2. **Fluent Bit forward:** The log line is picked up by Fluent Bit's tail input from the pod log file. The Lua filter decides to keep or drop it. If kept, it is forwarded to the OTel Collector via OTLP HTTP, which passes it to Loki.
 
-3. **Grafana deep link:** The "Vessel Operations" dashboard's logs panel has a configured data link on the `trace_id` field. Clicking it opens `http://<jaeger-host>/trace/<trace_id>` directly in Jaeger.
+3. **Grafana deep link (logs → traces):** The "Vessel Operations" dashboard's logs panel has a configured data link on the `trace_id` field. Clicking it opens `http://<jaeger-host>/trace/<trace_id>` directly in Jaeger.
+
+4. **Exemplar-based correlation (metrics → traces):** The `spanmetrics` connector reads every sampled span after tail sampling and generates Prometheus histogram metrics (`traces_duration_milliseconds_*`, `traces_calls_total`) with an **exemplar** — a sparse annotation carrying the `trace_id` of the specific request that contributed to that histogram bucket. Grafana retrieves these exemplars alongside the metric query and renders them as ◆ diamond markers on the timeseries panel. Clicking a diamond opens the exact trace in Jaeger. This works because:
+   - The `spanmetrics` connector runs **after** `tail_sampling` in the pipeline, so every exemplar `trace_id` is guaranteed to exist in Jaeger (no dead links).
+   - Prometheus is started with `--enable-feature=exemplar-storage`, which persists exemplars alongside the metric samples.
+   - The Prometheus data source in Grafana is configured with `exemplarTraceIdDestinations` pointing to the Jaeger data source UID.
 
 **Sampling alignment guarantee:** Because the OTel Collector's tail sampling and Fluent Bit's Lua filter use identical criteria (`ERROR` status or latency ≥ 200ms), for any given request exactly one of two outcomes occurs:
-- The request is fast and successful → span dropped by tail sampling, log dropped by Lua filter → neither appears in Jaeger or Loki
-- The request is slow or failed → span kept by tail sampling, log kept by Lua filter → both appear, connected by `trace_id`
+- The request is fast and successful → span dropped by tail sampling, log dropped by Lua filter → neither appears in Jaeger or Loki; no exemplar generated
+- The request is slow or failed → span kept by tail sampling, log kept by Lua filter → both appear, connected by `trace_id`; exemplar generated for metric correlation
 
-This deterministic alignment means there are no "orphaned" log entries (logs with a `trace_id` that doesn't exist in Jaeger) and no "orphaned" traces (traces without a corresponding log entry).
+This deterministic alignment means there are no "orphaned" log entries (logs with a `trace_id` that doesn't exist in Jaeger) and no "orphaned" traces (traces without a corresponding log entry), and every exemplar diamond in Grafana opens a valid trace.
 
 ### 3.4 Out-of-Order Ingestion and Gap-Fill
 
@@ -247,7 +252,7 @@ This disables the per-stream ordering requirement, allowing log entries from the
 | Component | Image | Version | Role | Node |
 |---|---|---|---|---|
 | edge-demo-app | built locally / `ghcr.io/graz-dev/edge-demo-app:latest` | — | Maritime vessel monitoring HTTP API | edge |
-| OTel Collector | `ghcr.io/graz-dev/otel-collector-edge` | 0.1.0 | Telemetry pipeline: receive, process, queue, export | edge |
+| OTel Collector | `ghcr.io/graz-dev/otel-collector-edge` | 0.3.0 | Telemetry pipeline: receive, process, queue, export | edge |
 | Fluent Bit | `fluent/fluent-bit` | 2.2 | Log tailing, Lua filtering, OTLP forwarding | edge |
 | network-chaos | `nicolaka/netshoot` | latest | Privileged DaemonSet for iptables simulation | edge |
 | Jaeger | `jaegertracing/all-in-one` | 1.54 | Distributed trace storage and UI | hub |
@@ -267,7 +272,7 @@ A Go HTTP server simulating a maritime vessel monitoring system. Four endpoints 
 | `GET /api/analytics/diagnostics` | 300–1500 ms | 0% | **Kept** (latency policy: >200ms) | 12% |
 | `GET /api/alerts/system` | 80–160 ms | 20% | **Kept** if error (error policy), **dropped** if success | 8% |
 
-Every request handler attaches `trace_id` and `span_id` to the structured log output (zap JSON logger). The application sends telemetry via OTLP gRPC to the OTel Collector at `otel-collector.observability.svc.cluster.local:4317`.
+Every request handler attaches `trace_id` and `span_id` to the structured log output (zap JSON logger). The application sends telemetry via OTLP gRPC to the OTel Collector at `otel-collector.edge-obs.svc.cluster.local:4317`.
 
 **Custom metrics exported:**
 - `http.server.request.count` — Int64Counter, incremented per request, labels: `http.route`, `http.status_code`
@@ -276,7 +281,7 @@ Every request handler attaches `trace_id` and `span_id` to the structured log ou
 
 ### OTel Collector (custom build)
 
-The standard `otelcol-contrib` distribution ships 150+ components (~250 MB). This project builds a minimal custom collector using the [OpenTelemetry Collector Builder (ocb)](https://github.com/open-telemetry/opentelemetry-collector/tree/main/cmd/builder) with exactly 9 components:
+The standard `otelcol-contrib` distribution ships 150+ components (~250 MB). This project builds a minimal custom collector using the [OpenTelemetry Collector Builder (ocb)](https://github.com/open-telemetry/opentelemetry-collector/tree/main/cmd/builder) with exactly 10 components:
 
 | Type | Name | Purpose |
 |---|---|---|
@@ -287,6 +292,7 @@ The standard `otelcol-contrib` distribution ships 150+ components (~250 MB). Thi
 | Processor | `batch` | Accumulate spans/metrics/logs into batches before export |
 | Processor | `resource` | Add common resource attributes (environment, cluster) |
 | Processor | `tail_sampling` | Buffered trace-outcome-aware sampling |
+| Connector | `spanmetrics` | Generate request-rate and latency histograms from sampled spans, with exemplars carrying `trace_id` for metric→trace correlation |
 | Exporter | `otlp` | Export traces to Jaeger via OTLP gRPC |
 | Exporter | `prometheusremotewrite` | Export metrics to Prometheus via remote-write |
 | Exporter | `loki` | Export logs to Loki via HTTP push |
@@ -299,10 +305,10 @@ The `edge-demo-app` image is built automatically via GitHub Actions (`.github/wo
 
 Fluent Bit runs as a DaemonSet on edge nodes, reading container logs from `/var/log/pods/`. The pipeline is:
 
-1. **Input (tail):** Read lines from `observability_edge-demo-app*/**/*.log` using the CRI log format parser.
+1. **Input (tail):** Read lines from `app_edge-demo-app*/**/*.log` using the CRI log format parser.
 2. **Filter (Kubernetes):** Enrich each log record with pod name, namespace, labels, and annotations.
 3. **Filter (Lua script):** Apply the sampling filter — keep only `level=error` or `duration_ms >= 200`. Drop everything else. This reduces log volume by ~86% before the data ever leaves the node.
-4. **Output (OpenTelemetry HTTP):** Forward kept records to the OTel Collector at `otel-collector.observability.svc.cluster.local:4318` via OTLP HTTP.
+4. **Output (OpenTelemetry HTTP):** Forward kept records to the OTel Collector at `otel-collector.edge-obs.svc.cluster.local:4318` via OTLP HTTP.
 
 Fluent Bit exposes Prometheus metrics at `:2020/api/v1/metrics/prometheus` (note: the path is specific to Fluent Bit 2.x, not the conventional `/metrics`). Prometheus scrapes these metrics for the "Log Flow" panel in the Edge Pipeline dashboard.
 
@@ -357,7 +363,7 @@ Prometheus: http://localhost:9090 (via kubectl port-forward, started by setup)
 ./scripts/load-generator.sh
 ```
 
-Creates the k6 TestRun custom resource. k6 runs 8 virtual users for 40 minutes, split across all four endpoints. Allow 30–60 seconds for the runner pod to start and for data to populate the dashboards before beginning the demo.
+Creates the k6 TestRun custom resource. k6 runs 500 virtual users for 40 minutes (ramp-up: 30s→100 VU, 30s→250 VU, 1m→500 VU, 40m steady-state), generating ~2 500 spans/s, split across all four endpoints. Allow 30–60 seconds for the runner pod to start and for data to populate the dashboards before beginning the demo.
 
 **Step 3: Run the demo**
 
@@ -390,9 +396,9 @@ Deletes the k3d cluster and all associated resources.
 If re-running Act 3, you must clear stale queue files first. Old bbolt entries contain metric timestamps that Prometheus will reject as out-of-order:
 
 ```bash
-CHAOS_POD=$(kubectl get pod -n observability -l app=network-chaos -o jsonpath='{.items[0].metadata.name}')
-kubectl exec -n observability "$CHAOS_POD" -- find /var/lib/otelcol/file_storage -type f -delete
-kubectl rollout restart daemonset/otel-collector -n observability
+CHAOS_POD=$(kubectl get pod -n testing -l app=network-chaos -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n testing "$CHAOS_POD" -- find /var/lib/otelcol/file_storage -type f -delete
+kubectl rollout restart daemonset/otel-collector -n edge-obs
 ```
 
 Wait for the collector DaemonSet to come back up before running the demo again.
@@ -555,7 +561,7 @@ A single gRPC call carrying 512 spans is orders of magnitude cheaper than 512 in
 
 ```yaml
   otlp/jaeger:
-    endpoint: jaeger.observability.svc.cluster.local:4317
+    endpoint: jaeger.hub-obs.svc.cluster.local:4317
     tls:
       insecure: true
     sending_queue:
@@ -580,7 +586,7 @@ The exporter name `otlp/jaeger` uses the name/alias syntax: `<type>/<alias>`. Th
 
 ```yaml
   prometheusremotewrite:
-    endpoint: http://prometheus.observability.svc.cluster.local:9090/api/v1/write
+    endpoint: http://prometheus.hub-obs.svc.cluster.local:9090/api/v1/write
     tls:
       insecure: true
     retry_on_failure:
@@ -597,7 +603,7 @@ The absence of `storage: file_storage` is a known limitation of the `prometheusr
 
 ```yaml
   loki:
-    endpoint: http://loki.observability.svc.cluster.local:3100/loki/api/v1/push
+    endpoint: http://loki.hub-obs.svc.cluster.local:3100/loki/api/v1/push
     tls:
       insecure: true
     sending_queue:
@@ -613,6 +619,34 @@ The absence of `storage: file_storage` is a known limitation of the `prometheusr
 ```
 
 Mirror of the Jaeger exporter. Both use the same file-backed queue and retry policy.
+
+#### Connectors — `spanmetrics`
+
+```yaml
+connectors:
+  spanmetrics:
+    namespace: traces
+    histogram:
+      explicit:
+        buckets: [10ms, 25ms, 50ms, 100ms, 250ms, 500ms, 1000ms, 2500ms]
+    dimensions:
+      - name: http.method
+      - name: http.status_code
+      - name: http.route
+    exemplars:
+      enabled: true
+```
+
+A **connector** acts simultaneously as an exporter and a receiver — it reads from one pipeline and injects data into another. `spanmetrics` reads the `traces` pipeline output and generates two metric families into the `metrics` pipeline:
+
+- `traces_calls_total` — counter of sampled calls, labelled by `http.method`, `http.status_code`, `http.route`, `status_code`, `service_name`, `span_name`
+- `traces_duration_milliseconds_{bucket,count,sum}` — histogram of span durations in ms, same labels, using the explicit bucket boundaries above
+
+`exemplars: enabled: true` attaches a Prometheus exemplar (a sparse annotation carrying the `trace_id`) to each histogram bucket observation. This is the mechanism that allows Grafana to render ◆ diamond markers on timeseries panels that, when clicked, open the exact trace in Jaeger.
+
+**Placement is critical:** `spanmetrics` is wired **after** `tail_sampling` in the traces pipeline (`exporters: [otlp/jaeger, spanmetrics]`). This guarantees that every `trace_id` embedded in an exemplar actually exists in Jaeger. If placed before tail sampling, ~80% of exemplar trace IDs would point to dropped traces — broken links.
+
+**Effect on the metrics pipeline:** The `metrics` pipeline has `receivers: [otlp, spanmetrics]`, meaning it receives both app metrics (from the OTLP receiver) and span-derived metrics (from the `spanmetrics` connector). All metrics are exported via `prometheusremotewrite` to Prometheus.
 
 #### Telemetry (collector self-monitoring)
 
@@ -651,7 +685,7 @@ Configuration is in `k8s/edge-node/fluentbit-config.yaml`, split into three sect
 ```ini
 [INPUT]
     Name              tail
-    Path              /var/log/pods/observability_edge-demo-app*/*/*.log
+    Path              /var/log/pods/app_edge-demo-app*/*/*.log
     Parser            cri
     Mem_Buf_Limit     5MB
     storage.type      filesystem
@@ -667,7 +701,7 @@ The path glob matches CRI-format log files for the `edge-demo-app` pod. CRI form
 
 [OUTPUT]
     Name                 opentelemetry
-    Host                 otel-collector.observability.svc.cluster.local
+    Host                 otel-collector.edge-obs.svc.cluster.local
     Port                 4318
     Log_response_payload True
     tls                  off
@@ -750,7 +784,7 @@ The 15-second scrape interval is the minimum time resolution for all Prometheus 
 scrape_configs:
   - job_name: 'otel-collector'
     static_configs:
-      - targets: ['otel-collector.observability.svc.cluster.local:8888']
+      - targets: ['otel-collector.edge-obs.svc.cluster.local:8888']
         labels:
           component: 'otel-collector'
           node_role: 'edge'
@@ -764,7 +798,7 @@ OTel Collector metrics come from the collector's own Prometheus endpoint at port
     kubernetes_sd_configs:
       - role: pod
         namespaces:
-          names: [observability]
+          names: [edge-obs]
     relabel_configs:
       - source_labels: [__meta_kubernetes_pod_label_app]
         action: keep
@@ -861,6 +895,23 @@ Shows four lines with relative heights reflecting the k6 load distribution: engi
 
 8 lines total (P50 + P95 × 4 routes). The `by (le, http_route)` preserves both the bucket dimension (required for quantile) and the route dimension (for per-endpoint breakdown). Expected pattern: engine/navigation ~60ms, diagnostics P50 ~600ms P95 ~1400ms, alerts ~120ms.
 
+#### Section: TRACE CORRELATION
+
+A dedicated row containing panels that use exemplars to link Prometheus metrics directly to individual traces in Jaeger.
+
+#### Panel: Sampled Request Latency
+
+| Property | Value |
+|---|---|
+| Type | Time series |
+| Unit | milliseconds |
+| P50 query (exemplar source) | `histogram_quantile(0.50, sum(rate(traces_duration_milliseconds_bucket{http_route!=""}[1m])) by (le, http_route))` with `exemplar: true` |
+| Average query | `sum(rate(traces_duration_milliseconds_sum{http_route!=""}[1m])) by (http_route) / sum(rate(traces_duration_milliseconds_count{http_route!=""}[1m])) by (http_route)` |
+
+This panel sources its exemplars from `traces_duration_milliseconds_bucket` (the histogram generated by `spanmetrics`). Each ◆ diamond represents a single sampled trace at its actual measured duration. The P50 line provides an anchor; the average line shows the mean latency of the kept (error or slow) subset. All exemplars are guaranteed ≥200ms or errors because tail sampling has already filtered the rest.
+
+Clicking a ◆ opens the exact trace in Jaeger. Exemplars are only rendered when the Prometheus data source has `exemplarTraceIdDestinations` configured (see `grafana-config.yaml`).
+
 #### Panel: Application Logs
 
 | Property | Value |
@@ -933,6 +984,19 @@ The ~86% gap between lines is structural: it reflects the traffic distribution (
 `otelcol_processor_tail_sampling_count_traces_sampled` — emitted by the tail sampler per policy. Counts **traces** (not spans). Labels: `policy` (policy name), `sampled` (true/false).
 
 Expected values: error policy ~0.013 traces/s, latency policy ~0.10 traces/s. The `or vector(0)` prevents "No data" gaps when traffic is momentarily zero.
+
+#### Panel: Sampled Calls by Endpoint
+
+| Property | Value |
+|---|---|
+| Type | Time series |
+| Unit | requests per second |
+| Error query (exemplar) | `sum(rate(traces_calls_total{status_code="STATUS_CODE_ERROR",http_route!=""}[1m])) by (http_route)` with `exemplar: true` |
+| Slow query (exemplar) | `sum(rate(traces_calls_total{status_code!="STATUS_CODE_ERROR",http_route!=""}[1m])) by (http_route)` with `exemplar: true` |
+
+Derived from `traces_calls_total` produced by the `spanmetrics` connector. Shows the call rate of **sampled** traffic only — errors and slow requests. The ◆ diamond markers are exemplars; clicking one opens the corresponding trace in Jaeger.
+
+**Note on exemplar positioning:** Exemplars on counter/rate panels appear near the bottom of the chart because their raw value is 1 (one call = one counter increment), which is much smaller than the rate on the Y-axis. The diamonds are still clickable and open valid traces — the visual position on the Y-axis is not meaningful in this case. For a more intuitive exemplar experience, use the latency panel in the TRACE CORRELATION section of the Vessel Operations dashboard.
 
 ---
 
@@ -1053,7 +1117,7 @@ The `prometheusremotewrite` exporter targets `/api/v1/write`. The remote-write e
 
 **Implication for the demo:** After restore, Jaeger has failure-window traces ✅, Loki has failure-window logs ✅, Prometheus has a visible gap in metrics ❌ (expected, documented, and itself a teaching point about signal-type differences in resilience guarantees).
 
-**Note:** `prometheusremotewrite` does not support `sending_queue.storage: file_storage` in OTel Collector v0.95. The metrics queue is in-memory only, so during a link outage, metrics are held in RAM (up to `queue_size` batches) and dropped if the outage exceeds `max_elapsed_time` (5 minutes). For the demo (2–3 min outage), no metrics are permanently lost — they resume after restore, just without the failure-window data.
+**Note:** `prometheusremotewrite` does not support `sending_queue.storage: file_storage` in the OTel Collector build used here (v0.96). The metrics queue is in-memory only, so during a link outage, metrics are held in RAM (up to `queue_size` batches) and dropped if the outage exceeds `max_elapsed_time` (5 minutes). For the demo (2–3 min outage), no metrics are permanently lost — they resume after restore, just without the failure-window data.
 
 ### 8.3 DaemonSet vs. Deployment for the OTel Collector
 
@@ -1069,7 +1133,7 @@ A DaemonSet runs exactly one pod per matching node. A Deployment with `replicas:
 
 ### 8.4 Custom OTel Collector Build
 
-`otelcol-contrib` ships 150+ components (~250 MB). This project builds a custom binary with exactly 9 components (~30 MB, 88% size reduction).
+`otelcol-contrib` ships 150+ components (~250 MB). This project builds a custom binary with exactly 10 components (~30 MB, 88% size reduction).
 
 **Benefits:** Smaller attack surface, faster startup, fully auditable component set, no code for unused exporters/receivers.
 
@@ -1194,15 +1258,17 @@ observability-on-edge/
 │       └── resources/
 │           └── otelcol-pvc.yaml        # PVC: 1Gi, civo-volume StorageClass
 │
-├── load-tests/
-│   └── k6-script.js                   # 40-min, 8 VU, 4-endpoint distribution
+├── k8s/load-test/
+│   ├── k6-script-configmap.yaml       # k6 script: 40-min, 500 VU, ~2 500 spans/s, 4-endpoint distribution
+│   └── testrun.yaml                   # k6 Operator TestRun CR (runner resources for 500 VU)
 │
 ├── scripts/
 │   ├── setup.sh                       # Cluster setup (--env local|civo)
-│   ├── load-generator.sh              # Create k6 TestRun
+│   ├── load-generator.sh              # Create k6 TestRun (500 VU, 40 min)
 │   ├── demo.sh                        # Orchestrated demo Acts 1–3
 │   ├── simulate-network-failure.sh    # Insert iptables DROP rules
 │   ├── restore-network.sh             # Remove iptables DROP rules
+│   ├── toggle-tail-sampling.sh        # Enable/disable tail sampling (OTel + Fluent Bit)
 │   └── cleanup.sh                     # Delete cluster
 │
 ├── .github/workflows/
@@ -1220,12 +1286,12 @@ observability-on-edge/
 ### Collector pods are CrashLooping
 
 ```bash
-kubectl logs -n observability daemonset/otel-collector --previous
+kubectl logs -n edge-obs daemonset/otel-collector --previous
 ```
 
 Common causes:
 - **Configuration parse error:** Validate YAML syntax in `otel-collector-config.yaml`.
-- **Memory limit exceeded:** Check for OOM events: `kubectl describe pod -n observability <collector-pod>`. Reduce traffic or increase `spec.containers[0].resources.limits.memory`.
+- **Memory limit exceeded:** Check for OOM events: `kubectl describe pod -n edge-obs <collector-pod>`. Reduce traffic or increase `spec.containers[0].resources.limits.memory`.
 - **File storage permission error:** The path `/var/lib/otelcol/file_storage` must be writable by the process (runs as root). On local k3d, `hostPath.type: DirectoryOrCreate` handles this automatically.
 
 ### `otelcol_exporter_queue_size` always shows 0
@@ -1233,7 +1299,7 @@ Common causes:
 Check all three conditions:
 1. `telemetry.metrics.level: detailed` is set in the collector config
 2. `num_consumers: 1` is set for `otlp/jaeger` and `loki` exporters
-3. The collector was restarted after the config change: `kubectl rollout restart daemonset/otel-collector -n observability`
+3. The collector was restarted after the config change: `kubectl rollout restart daemonset/otel-collector -n edge-obs`
 4. A network failure simulation is currently active (run `simulate-network-failure.sh` first)
 
 ### Stale queue files causing export errors after demo reset
@@ -1241,36 +1307,36 @@ Check all three conditions:
 Old bbolt entries contain metric timestamps that Prometheus rejects as out-of-order. Symptoms: collector logs show HTTP 400 errors, "Permanent Data Drops" panel shows non-zero values.
 
 ```bash
-CHAOS_POD=$(kubectl get pod -n observability -l app=network-chaos -o jsonpath='{.items[0].metadata.name}')
-kubectl exec -n observability "$CHAOS_POD" -- find /var/lib/otelcol/file_storage -type f -delete
-kubectl rollout restart daemonset/otel-collector -n observability
+CHAOS_POD=$(kubectl get pod -n testing -l app=network-chaos -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n testing "$CHAOS_POD" -- find /var/lib/otelcol/file_storage -type f -delete
+kubectl rollout restart daemonset/otel-collector -n edge-obs
 ```
 
 ### iptables rules not blocking traffic
 
 Verify rules in both backends:
 ```bash
-CHAOS_POD=$(kubectl get pod -n observability -l app=network-chaos -o jsonpath='{.items[0].metadata.name}')
-kubectl exec -n observability "$CHAOS_POD" -- sh -c \
+CHAOS_POD=$(kubectl get pod -n testing -l app=network-chaos -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n testing "$CHAOS_POD" -- sh -c \
   "iptables -L FORWARD -n 2>/dev/null; echo '---'; iptables-legacy -L FORWARD -n 2>/dev/null"
 ```
 
 If rules are present but traffic still flows, conntrack was not flushed:
 ```bash
 POD_IP=$(cat /tmp/otel-collector-pod-ip)
-kubectl exec -n observability "$CHAOS_POD" -- conntrack -D -s "$POD_IP"
+kubectl exec -n testing "$CHAOS_POD" -- conntrack -D -s "$POD_IP"
 ```
 
 ### Gap-fill not working for logs after restore
 
 Verify Loki has `unordered_writes: true`:
 ```bash
-kubectl exec -n observability deployment/loki -- grep unordered /etc/loki/loki.yaml
+kubectl exec -n hub-obs deployment/loki -- grep unordered /etc/loki/loki.yaml
 ```
 
 If missing, update `loki-config.yaml`, re-apply, and restart Loki:
 ```bash
-kubectl rollout restart deployment/loki -n observability
+kubectl rollout restart deployment/loki -n hub-obs
 ```
 
 ### Civo: PVC stuck in `Pending`
@@ -1278,7 +1344,7 @@ kubectl rollout restart deployment/loki -n observability
 The `civo-volume` StorageClass uses `WaitForFirstConsumer` binding mode. The PVC binds to a node only when a pod is scheduled. This resolves automatically once the DaemonSet pod is placed. `setup.sh` polls for PVC `Bound` status before proceeding.
 
 ```bash
-kubectl describe pvc otelcol-file-storage -n observability
+kubectl describe pvc otelcol-file-storage -n edge-obs
 ```
 
 ### Civo: node count stuck at 0 during setup

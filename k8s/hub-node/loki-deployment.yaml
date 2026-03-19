@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: loki
-  namespace: observability
+  namespace: hub-obs
   labels:
     app: loki
     component: logs

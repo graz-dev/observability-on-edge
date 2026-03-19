@@ -2,13 +2,13 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: otel-collector
-  namespace: observability
+  namespace: edge-obs
 ---
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: otel-collector
-  namespace: observability
+  namespace: edge-obs
   labels:
     app: otel-collector
     component: collector
@@ -35,7 +35,7 @@ spec:
           effect: NoSchedule
       containers:
       - name: otel-collector
-        image: ghcr.io/graz-dev/otel-collector-edge:0.1.0
+        image: ghcr.io/graz-dev/otel-collector-edge:0.3.0
         args:
         - --config=/conf/otel-collector-config.yaml
         securityContext:

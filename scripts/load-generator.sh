@@ -7,7 +7,7 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-NAMESPACE="observability"
+NAMESPACE="testing"
 TESTRUN_NAME="vessel-monitoring"
 
 echo -e "${GREEN}⚓ Starting Maritime Vessel Monitoring Load Test${NC}"
@@ -81,7 +81,7 @@ RUNNER_POD=$(kubectl get pods -n "${NAMESPACE}" -l "k6_cr=${TESTRUN_NAME}" \
 
 echo ""
 echo -e "${GREEN}✅ Load test running${NC}"
-echo "   TestRun:    ${TESTRUN_NAME} (40 min, 8 VU sustained)"
+echo "   TestRun:    ${TESTRUN_NAME} (40 min steady-state, 500 VU, ~2 500 spans/s)"
 echo "   Runner pod: ${RUNNER_POD:-<starting>}"
 echo ""
 echo -e "${YELLOW}📊 Monitor:${NC}"

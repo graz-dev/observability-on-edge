@@ -39,7 +39,10 @@ if ! [[ "$START_ACT" =~ ^[123]$ ]]; then
 fi
 
 # ── Constants ──────────────────────────────────────────────
-NAMESPACE="observability"
+NS_APP="app"
+NS_EDGE_OBS="edge-obs"
+NS_HUB_OBS="hub-obs"
+NS_TESTING="testing"
 PROM_LOCAL_PORT=19090
 TESTRUN_NAME="vessel-monitoring"
 FAILURE_DURATION=90   # seconds to hold the link down
@@ -47,9 +50,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ── Access URLs (env-dependent) ─────────────────────────────
 if [[ "$DEMO_ENV" == "civo" ]]; then
-  GRAFANA_LB=$(kubectl get svc grafana -n "${NAMESPACE}" \
+  GRAFANA_LB=$(kubectl get svc grafana -n "${NS_HUB_OBS}" \
     -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
-  JAEGER_LB=$(kubectl get svc jaeger -n "${NAMESPACE}" \
+  JAEGER_LB=$(kubectl get svc jaeger -n "${NS_HUB_OBS}" \
     -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
   GRAFANA_URL="http://${GRAFANA_LB}:3000"
   JAEGER_URL="http://${JAEGER_LB}:16686"
@@ -108,7 +111,7 @@ press_enter() {
 
 # ── Prometheus helpers ──────────────────────────────────────
 start_prom_pf() {
-  kubectl port-forward -n "${NAMESPACE}" svc/prometheus \
+  kubectl port-forward -n "${NS_HUB_OBS}" svc/prometheus \
     "${PROM_LOCAL_PORT}":9090 &>/dev/null &
   PROM_PF_PID=$!
   sleep 2
@@ -199,27 +202,29 @@ preflight() {
   fi
 
   # Namespace
-  kubectl get namespace "${NAMESPACE}" &>/dev/null \
-    && ok "Namespace '${NAMESPACE}' exists" \
-    || { fail "Namespace '${NAMESPACE}' missing — run ./scripts/setup.sh --env ${DEMO_ENV}"; exit 1; }
+  kubectl get namespace "${NS_HUB_OBS}" &>/dev/null \
+    && ok "Namespace '${NS_HUB_OBS}' exists" \
+    || { fail "Namespace '${NS_HUB_OBS}' missing — run ./scripts/setup.sh --env ${DEMO_ENV}"; exit 1; }
 
   # All pods Running
   local not_running
-  not_running=$(kubectl get pods -n "${NAMESPACE}" --no-headers 2>/dev/null \
+  not_running=$(kubectl get pods -A --no-headers 2>/dev/null \
+    | { grep -E "^(app|edge-obs|hub-obs|testing) " || true; } \
     | { grep -v -E "(Running|Completed|Succeeded)" || true; } \
     | { grep -v "^$" || true; } \
     | wc -l | tr -d ' ')
   if [[ "$not_running" -eq 0 ]]; then
     ok "All pods Running"
   else
-    warn "${not_running} pod(s) not Running — check: kubectl get pods -n ${NAMESPACE}"
-    kubectl get pods -n "${NAMESPACE}" --no-headers 2>/dev/null \
+    warn "${not_running} pod(s) not Running — check: kubectl get pods -A"
+    kubectl get pods -A --no-headers 2>/dev/null \
+      | { grep -E "^(app|edge-obs|hub-obs|testing) " || true; } \
       | { grep -v -E "(Running|Completed|Succeeded)" || true; } | sed 's/^/    /'
   fi
 
   # App health
-  if kubectl exec -n "${NAMESPACE}" deployment/prometheus -- \
-       wget -qO- http://edge-demo-app.observability.svc.cluster.local:8080/health \
+  if kubectl exec -n "${NS_HUB_OBS}" deployment/prometheus -- \
+       wget -qO- http://edge-demo-app.app.svc.cluster.local:8080/health \
        &>/dev/null; then
     ok "edge-demo-app is responding"
   else
@@ -257,14 +262,14 @@ preflight() {
 
   # No stale iptables rules from a previous run
   local CHAOS_POD
-  CHAOS_POD=$(kubectl get pod -n "${NAMESPACE}" -l app=network-chaos \
+  CHAOS_POD=$(kubectl get pod -n "${NS_TESTING}" -l app=network-chaos \
     -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
   if [[ -n "$CHAOS_POD" ]]; then
     local stale_rules
     # Check both iptables backends (nft and legacy) — k3d may use either.
     # Use { grep -c DROP || true; } so grep's exit-1-on-no-match doesn't trigger
     # the outer || echo 0, which would produce "0\n0" and break [[ -eq 0 ]].
-    stale_rules=$(kubectl exec -n "${NAMESPACE}" "$CHAOS_POD" -- sh -c \
+    stale_rules=$(kubectl exec -n "${NS_TESTING}" "$CHAOS_POD" -- sh -c \
       '{ iptables -L FORWARD -n 2>/dev/null; iptables-legacy -L FORWARD -n 2>/dev/null; } | { grep -c DROP || true; }' \
       2>/dev/null || echo 0)
     if [[ "$stale_rules" -eq 0 ]]; then
@@ -282,13 +287,13 @@ ensure_load_test() {
   section "Load test (k6 Operator)"
 
   local stage
-  stage=$(kubectl get testrun "${TESTRUN_NAME}" -n "${NAMESPACE}" \
+  stage=$(kubectl get testrun "${TESTRUN_NAME}" -n "${NS_TESTING}" \
     -o jsonpath='{.status.stage}' 2>/dev/null || echo "not-found")
 
   case "$stage" in
     "started")
       local runner_pod
-      runner_pod=$(kubectl get pods -n "${NAMESPACE}" -l "k6_cr=${TESTRUN_NAME}" \
+      runner_pod=$(kubectl get pods -n "${NS_TESTING}" -l "k6_cr=${TESTRUN_NAME}" \
         --no-headers 2>/dev/null | head -1 | awk '{print $1}')
       ok "TestRun '${TESTRUN_NAME}' is running (pod: ${runner_pod:-?})"
       ;;
@@ -304,7 +309,7 @@ ensure_load_test() {
       info "TestRun stage: '${stage}' (still initializing, waiting up to 60s)..."
       local start=$SECONDS
       while [[ $(( SECONDS - start )) -lt 60 ]]; do
-        stage=$(kubectl get testrun "${TESTRUN_NAME}" -n "${NAMESPACE}" \
+        stage=$(kubectl get testrun "${TESTRUN_NAME}" -n "${NS_TESTING}" \
           -o jsonpath='{.status.stage}' 2>/dev/null || echo "")
         [[ "$stage" == "started" ]] && { ok "TestRun started"; return 0; }
         sleep 5
@@ -424,9 +429,9 @@ Watch 'Trace Queue Depth' start rising."
   echo ""
   echo -e "  ${B}→ File storage on edge node (queued batches):${NC}"
   local COLLECTOR_POD CHAOS_POD_ACT3
-  COLLECTOR_POD=$(kubectl get pod -n "${NAMESPACE}" -l app=otel-collector \
+  COLLECTOR_POD=$(kubectl get pod -n "${NS_EDGE_OBS}" -l app=otel-collector \
     -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-  CHAOS_POD_ACT3=$(kubectl get pod -n "${NAMESPACE}" -l app=network-chaos \
+  CHAOS_POD_ACT3=$(kubectl get pod -n "${NS_TESTING}" -l app=network-chaos \
     -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
 
   # On local (k3d): chaos pod mounts the same hostPath as the collector → can list files.
@@ -435,10 +440,10 @@ Watch 'Trace Queue Depth' start rising."
   _show_file_storage() {
     if [[ "$DEMO_ENV" == "local" ]]; then
       { [[ -n "$COLLECTOR_POD" ]] && \
-          kubectl exec -n "${NAMESPACE}" "$COLLECTOR_POD" -- \
+          kubectl exec -n "${NS_EDGE_OBS}" "$COLLECTOR_POD" -- \
             ls -lah /var/lib/otelcol/file_storage/ 2>/dev/null; } || \
       { [[ -n "$CHAOS_POD_ACT3" ]] && \
-          kubectl exec -n "${NAMESPACE}" "$CHAOS_POD_ACT3" -- \
+          kubectl exec -n "${NS_TESTING}" "$CHAOS_POD_ACT3" -- \
             ls -lah /var/lib/otelcol/file_storage/ 2>/dev/null; } || \
       echo "    (file storage not readable)"
     else
@@ -446,7 +451,7 @@ Watch 'Trace Queue Depth' start rising."
       # The collector image is distroless — no shell to exec into.
       # Show PVC capacity and the collector's accepted-vs-exported span delta instead.
       local pvc_capacity accepted exported queued
-      pvc_capacity=$(kubectl get pvc otelcol-file-storage -n "${NAMESPACE}" \
+      pvc_capacity=$(kubectl get pvc otelcol-file-storage -n "${NS_EDGE_OBS}" \
         -o jsonpath='{.status.capacity.storage}' 2>/dev/null || echo "?")
       accepted=$(prom_value 'sum(increase(otelcol_receiver_accepted_spans[2m]))')
       exported=$(prom_value 'sum(increase(otelcol_exporter_sent_spans[2m]))')
@@ -586,7 +591,7 @@ show_summary() {
 
   echo ""
   echo -e "  ${DIM}Load test still running. To stop:${NC}"
-  echo -e "  ${DIM}  kubectl delete testrun ${TESTRUN_NAME} -n ${NAMESPACE}${NC}"
+  echo -e "  ${DIM}  kubectl delete testrun ${TESTRUN_NAME} -n ${NS_TESTING}${NC}"
   echo ""
 }
 

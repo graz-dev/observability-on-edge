@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: otel-collector-config
-  namespace: observability
+  namespace: edge-obs
 data:
   otel-collector-config.yaml: |
     extensions:
@@ -65,9 +65,27 @@ data:
             latency:
               threshold_ms: 200
 
+    connectors:
+      # Generates request-rate and duration histograms directly from sampled spans,
+      # with exemplars that carry trace_id → allows jumping from a Grafana metric
+      # spike directly to the corresponding trace in Jaeger.
+      # Placed after tail_sampling so every exemplar trace_id is guaranteed to
+      # exist in Jaeger (no dead links).
+      spanmetrics:
+        namespace: traces
+        histogram:
+          explicit:
+            buckets: [10ms, 25ms, 50ms, 100ms, 250ms, 500ms, 1000ms, 2500ms]
+        dimensions:
+          - name: http.method
+          - name: http.status_code
+          - name: http.route
+        exemplars:
+          enabled: true
+
     exporters:
       otlp/jaeger:
-        endpoint: jaeger.observability.svc.cluster.local:4317
+        endpoint: jaeger.hub-obs.svc.cluster.local:4317
         tls:
           insecure: true
         sending_queue:
@@ -92,7 +110,7 @@ data:
       # storage), so metric queuing is in-memory only. Metrics resume after restore
       # but the failure-window gap is NOT back-filled. Traces and logs DO back-fill.
       prometheusremotewrite:
-        endpoint: http://prometheus.observability.svc.cluster.local:9090/api/v1/write
+        endpoint: http://prometheus.hub-obs.svc.cluster.local:9090/api/v1/write
         tls:
           insecure: true
         retry_on_failure:
@@ -102,7 +120,7 @@ data:
           max_elapsed_time: 300s
 
       loki:
-        endpoint: http://loki.observability.svc.cluster.local:3100/loki/api/v1/push
+        endpoint: http://loki.hub-obs.svc.cluster.local:3100/loki/api/v1/push
         tls:
           insecure: true
         sending_queue:
@@ -123,10 +141,10 @@ data:
         traces:
           receivers: [otlp]
           processors: [memory_limiter, resource, tail_sampling, batch]
-          exporters: [otlp/jaeger]
+          exporters: [otlp/jaeger, spanmetrics]
 
         metrics:
-          receivers: [otlp]
+          receivers: [otlp, spanmetrics]
           processors: [memory_limiter, resource, batch]
           exporters: [prometheusremotewrite]
 

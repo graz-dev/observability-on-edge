@@ -23,7 +23,7 @@ func InitTelemetry(ctx context.Context) (*sdktrace.TracerProvider, *sdkmetric.Me
 	// Get OTLP endpoint from environment or use default
 	otlpEndpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
 	if otlpEndpoint == "" {
-		otlpEndpoint = "otel-collector.observability.svc.cluster.local:4317"
+		otlpEndpoint = "otel-collector.edge-obs.svc.cluster.local:4317"
 	}
 
 	// Create resource with service information

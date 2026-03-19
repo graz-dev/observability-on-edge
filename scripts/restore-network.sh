@@ -11,7 +11,7 @@ echo -e "${GREEN}🔌 Restoring Satellite Link...${NC}"
 echo "=========================================="
 
 # Get the network-chaos pod (privileged, hostNetwork — iptables commands affect the node directly)
-CHAOS_POD=$(kubectl get pod -n observability -l app=network-chaos \
+CHAOS_POD=$(kubectl get pod -n testing -l app=network-chaos \
   -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
 
 if [ -z "$CHAOS_POD" ]; then
@@ -31,7 +31,7 @@ echo -e "\n${GREEN}✓ Removing iptables DROP rules for OTel Collector (${POD_IP
 # Helper: remove DROP rule from BOTH iptables backends (mirrors the dual-insert in simulate).
 _undrop() {
   local dport="$1"
-  kubectl exec -n observability "$CHAOS_POD" -- sh -c \
+  kubectl exec -n testing "$CHAOS_POD" -- sh -c \
     "iptables        -D FORWARD -s ${POD_IP} -p tcp --dport ${dport} -j DROP 2>/dev/null || true
      iptables-legacy -D FORWARD -s ${POD_IP} -p tcp --dport ${dport} -j DROP 2>/dev/null || true"
 }

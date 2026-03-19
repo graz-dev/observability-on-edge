@@ -1,0 +1,61 @@
+parameters:
+  # ── Batch processor ────────────────────────────────────────────────────────
+  # How long the processor accumulates spans/logs/metrics before flushing.
+  # Larger → fewer flushes, higher in-flight memory; smaller → more CPU overhead.
+  - name: batch_timeout_s
+    description: Batch flush timeout (seconds)
+    restart: true
+
+  # Target number of items per batch. Larger → fewer network round-trips but
+  # more heap per batch; smaller → lower per-batch memory at higher call rate.
+  - name: batch_send_size
+    description: Target batch item count (spans / log records / data-points)
+    restart: true
+    
+  # ── Tail-based sampling ─────────────────────────────────────────────────────
+  # Window during which all spans of a trace are held in memory awaiting a
+  # decision.  This is the single biggest memory driver: high decision_wait ×
+  # high expected_new_traces_per_sec → large in-memory trace buffer.
+  - name: tail_decision_wait_s
+    description: Tail-sampling decision window (seconds)
+    restart: true
+    
+  # Upper bound on concurrent in-flight traces held in the sampler's LRU map.
+  # Evicted entries are decided immediately as "sampled", so too-small values
+  # increase false positives; too-large values waste RSS.
+  - name: tail_num_traces
+    description: Max number of in-flight traces held in tail-sampler LRU map
+    restart: true
+    
+  # ── Memory limiter ──────────────────────────────────────────────────────────
+  # Soft cap on process RSS.  When exceeded, the limiter starts refusing new
+  # data (back-pressure); when spike headroom is used up, it hard-refuses.
+  # Must be well below the K8s memory limit (512 Mi).
+  - name: memory_limit_mib
+    description: memory_limiter hard limit (MiB) — must be < K8s limit (512 Mi)
+    restart: true
+    
+  - name: memory_spike_mib
+    description: memory_limiter spike headroom (MiB) above limit_mib
+    restart: true
+    
+  # ── Go runtime ─────────────────────────────────────────────────────────────
+  # GOGC: GC target percentage.  Lower → GC runs more often → lower heap
+  # ceiling → more CPU; higher → larger heap before GC → less CPU but more RSS.
+  - name: gogc
+    description: Go GC target percentage (GOGC env var)
+    restart: true
+    
+  # GOMEMLIMIT: soft memory ceiling for the Go heap (MiB).  When RSS approaches
+  # this value the runtime ignores GOGC and collects aggressively.  Effective
+  # floor on RSS — set below memory_limit_mib.
+  - name: gomemlimit_mib
+    description: Go soft memory limit (GOMEMLIMIT env var, MiB)
+    restart: true
+    
+  # GOMAXPROCS: number of OS threads the scheduler can use in parallel.
+  # Fewer threads → less CPU contention and context switching; too few → risk
+  # of goroutine starvation on the gRPC/HTTP listener paths.
+  - name: gomaxprocs
+    description: Go max OS threads (GOMAXPROCS env var)
+    restart: true
