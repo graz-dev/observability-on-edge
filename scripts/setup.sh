@@ -112,7 +112,7 @@ if [[ "$DEMO_ENV" == "local" ]]; then
   # directly from ghcr.io instead — the image is ~30 MB so this is fast enough.
   echo -e "\n${YELLOW}📦 Pre-pulling OTel Collector image (will pull from ghcr.io at pod start)...${NC}"
   ARCH=$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/')
-  docker pull --platform "linux/${ARCH}" ghcr.io/graz-dev/otel-collector-edge:0.1.0 2>&1 | tail -1
+  docker pull --platform "linux/${ARCH}" ghcr.io/graz-dev/otel-collector-edge:0.3.0 2>&1 | tail -1
   echo -e "${GREEN}✓ OTel Collector image cached on Docker host${NC}"
 
   # Install k6 Operator
@@ -244,7 +244,7 @@ else
   # Pre-pull the custom OTel Collector image (Civo nodes pull directly from ghcr.io)
   echo -e "\n${YELLOW}📦 Pre-pulling OTel Collector image...${NC}"
   ARCH=$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/')
-  docker pull --platform "linux/${ARCH}" ghcr.io/graz-dev/otel-collector-edge:0.1.0 2>&1 | tail -1
+  docker pull --platform "linux/${ARCH}" ghcr.io/graz-dev/otel-collector-edge:0.3.0 2>&1 | tail -1
   echo -e "${GREEN}✓ OTel Collector image cached on Docker host${NC}"
 
   # Install k6 Operator

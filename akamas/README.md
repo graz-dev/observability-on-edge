@@ -60,7 +60,7 @@ needed rate = tail_num_traces / decision_wait
            = 1 000 / 5 s = 200 traces/s   (lower bound of the range)
 ```
 
-At the demo load (8 VUs, sleep 0.5–2.5 s) the app generates ~5 traces/s → only ~25 in flight. The parameter would be invisible to the optimiser. At 100 VUs with fast-endpoint sleep reduced to 0.1–0.5 s the app generates ~255 traces/s → ~1 275 in flight at default `decision_wait`, which covers the meaningful part of the range.
+At the demo load (500 VUs, sleep 0.1–0.5 s) the app generates ~2 500 spans/s → ~1 250 traces in flight at default `decision_wait=5s`. The optimisation workload uses 100 VUs to keep experiment duration manageable (~12.5 min) while still generating ~255 traces/s → ~1 275 in flight, which covers the meaningful part of the range.
 
 ### Test structure
 
@@ -75,13 +75,13 @@ At the demo load (8 VUs, sleep 0.5–2.5 s) the app generates ~5 traces/s → on
 **Total: ~12.5 min workload + ~90 s collector restart = ~14 min/experiment.**
 With 60 experiments the full study takes approximately 14 hours.
 
-| Aspect | Demo (`k6-script.js`) | Optimisation (`k6-optimization.js`) |
-|--------|-----------------------|-------------------------------------|
-| Peak VUs | 8 | **100** |
-| Ramp-up | 30 s → 5 VU, then 39 min → 8 VU | 30 s → 20, 30 s → 50, 1 m → 100 |
-| Steady-state | 39 min | **10 min** |
+| Aspect | Demo (`k6-script-configmap.yaml`) | Optimisation (`k6-optimization.js`) |
+|--------|------------------------------------|-------------------------------------|
+| Peak VUs | **500** | **100** |
+| Ramp-up | 30 s → 100, 30 s → 250, 1 m → 500 | 30 s → 20, 30 s → 50, 1 m → 100 |
+| Steady-state | **40 min** | **10 min** |
 | Traffic mix | 50 % engine / 30 % nav / 12 % diag / 8 % alerts | identical |
-| Fast-endpoint sleep | 0.5–2.5 s | **0.1–0.5 s** (rapid sensor polling) |
+| Fast-endpoint sleep | 0.1–0.5 s | **0.1–0.5 s** (rapid sensor polling) |
 | Diagnostics sleep | 2–7 s | identical |
 | Per-endpoint check thresholds | yes | identical |
 | k6 metrics (`slowDiagnostics`, `latency`) | yes | identical |
@@ -504,4 +504,4 @@ Based on the consistent convergence across the top 10 experiments:
 | `batch_send_size` | 512 | 128–2 048 | No significant impact; keep at 512 or lower for lower per-batch heap |
 | `batch_timeout_s` | 5 s | 1–5 s | No significant impact; shorter = faster export latency |
 
-> **Caveat:** These values were measured at 100 VUs (optimisation workload). The demo runs at 8 VUs, which generates ~5 traces/s. At that rate `tail_num_traces = 1 000` holds all in-flight traces with no evictions, which is even safer. However, `memory_limit_mib = 128` is a tight ceiling; if future demo load increases significantly, raise it to 200 Mi to avoid any risk of back-pressure refusals.
+> **Caveat:** These values were measured at 100 VUs (optimisation workload). The demo now runs at 500 VUs, generating ~2 500 spans/s (~1 250 traces in flight at `decision_wait=5s`). With `tail_num_traces = 1 000` the LRU will evict ~250 traces per second, exporting them without a sampling decision — this is safe (evicted traces are exported, not dropped) and keeps the buffer tiny. At this load level `memory_limit_mib = 128 Mi` may be tight; prefer `200 Mi` as a safe ceiling.

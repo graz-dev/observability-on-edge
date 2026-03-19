@@ -208,7 +208,7 @@ Observability is only actionable when the three signal types can be navigated to
 
 **How correlation is implemented here:**
 
-1. **Trace context propagation:** The demo app creates an OpenTelemetry span for every incoming HTTP request. The span's `trace_id` and `span_id` are extracted and injected into every structured log line via the [zap](https://github.com/uber-go/zap) logger. Log format:
+1. **Trace context propagation (traces → logs):** The demo app creates an OpenTelemetry span for every incoming HTTP request. The span's `trace_id` and `span_id` are extracted and injected into every structured log line via the [zap](https://github.com/uber-go/zap) logger. Log format:
    ```json
    {"timestamp":"2025-01-15T10:23:45Z","level":"error","msg":"request failed",
     "trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","span_id":"00f067aa0ba902b7",
@@ -217,13 +217,18 @@ Observability is only actionable when the three signal types can be navigated to
 
 2. **Fluent Bit forward:** The log line is picked up by Fluent Bit's tail input from the pod log file. The Lua filter decides to keep or drop it. If kept, it is forwarded to the OTel Collector via OTLP HTTP, which passes it to Loki.
 
-3. **Grafana deep link:** The "Vessel Operations" dashboard's logs panel has a configured data link on the `trace_id` field. Clicking it opens `http://<jaeger-host>/trace/<trace_id>` directly in Jaeger.
+3. **Grafana deep link (logs → traces):** The "Vessel Operations" dashboard's logs panel has a configured data link on the `trace_id` field. Clicking it opens `http://<jaeger-host>/trace/<trace_id>` directly in Jaeger.
+
+4. **Exemplar-based correlation (metrics → traces):** The `spanmetrics` connector reads every sampled span after tail sampling and generates Prometheus histogram metrics (`traces_duration_milliseconds_*`, `traces_calls_total`) with an **exemplar** — a sparse annotation carrying the `trace_id` of the specific request that contributed to that histogram bucket. Grafana retrieves these exemplars alongside the metric query and renders them as ◆ diamond markers on the timeseries panel. Clicking a diamond opens the exact trace in Jaeger. This works because:
+   - The `spanmetrics` connector runs **after** `tail_sampling` in the pipeline, so every exemplar `trace_id` is guaranteed to exist in Jaeger (no dead links).
+   - Prometheus is started with `--enable-feature=exemplar-storage`, which persists exemplars alongside the metric samples.
+   - The Prometheus data source in Grafana is configured with `exemplarTraceIdDestinations` pointing to the Jaeger data source UID.
 
 **Sampling alignment guarantee:** Because the OTel Collector's tail sampling and Fluent Bit's Lua filter use identical criteria (`ERROR` status or latency ≥ 200ms), for any given request exactly one of two outcomes occurs:
-- The request is fast and successful → span dropped by tail sampling, log dropped by Lua filter → neither appears in Jaeger or Loki
-- The request is slow or failed → span kept by tail sampling, log kept by Lua filter → both appear, connected by `trace_id`
+- The request is fast and successful → span dropped by tail sampling, log dropped by Lua filter → neither appears in Jaeger or Loki; no exemplar generated
+- The request is slow or failed → span kept by tail sampling, log kept by Lua filter → both appear, connected by `trace_id`; exemplar generated for metric correlation
 
-This deterministic alignment means there are no "orphaned" log entries (logs with a `trace_id` that doesn't exist in Jaeger) and no "orphaned" traces (traces without a corresponding log entry).
+This deterministic alignment means there are no "orphaned" log entries (logs with a `trace_id` that doesn't exist in Jaeger) and no "orphaned" traces (traces without a corresponding log entry), and every exemplar diamond in Grafana opens a valid trace.
 
 ### 3.4 Out-of-Order Ingestion and Gap-Fill
 
@@ -247,7 +252,7 @@ This disables the per-stream ordering requirement, allowing log entries from the
 | Component | Image | Version | Role | Node |
 |---|---|---|---|---|
 | edge-demo-app | built locally / `ghcr.io/graz-dev/edge-demo-app:latest` | — | Maritime vessel monitoring HTTP API | edge |
-| OTel Collector | `ghcr.io/graz-dev/otel-collector-edge` | 0.1.0 | Telemetry pipeline: receive, process, queue, export | edge |
+| OTel Collector | `ghcr.io/graz-dev/otel-collector-edge` | 0.3.0 | Telemetry pipeline: receive, process, queue, export | edge |
 | Fluent Bit | `fluent/fluent-bit` | 2.2 | Log tailing, Lua filtering, OTLP forwarding | edge |
 | network-chaos | `nicolaka/netshoot` | latest | Privileged DaemonSet for iptables simulation | edge |
 | Jaeger | `jaegertracing/all-in-one` | 1.54 | Distributed trace storage and UI | hub |
@@ -276,7 +281,7 @@ Every request handler attaches `trace_id` and `span_id` to the structured log ou
 
 ### OTel Collector (custom build)
 
-The standard `otelcol-contrib` distribution ships 150+ components (~250 MB). This project builds a minimal custom collector using the [OpenTelemetry Collector Builder (ocb)](https://github.com/open-telemetry/opentelemetry-collector/tree/main/cmd/builder) with exactly 9 components:
+The standard `otelcol-contrib` distribution ships 150+ components (~250 MB). This project builds a minimal custom collector using the [OpenTelemetry Collector Builder (ocb)](https://github.com/open-telemetry/opentelemetry-collector/tree/main/cmd/builder) with exactly 10 components:
 
 | Type | Name | Purpose |
 |---|---|---|
@@ -287,6 +292,7 @@ The standard `otelcol-contrib` distribution ships 150+ components (~250 MB). Thi
 | Processor | `batch` | Accumulate spans/metrics/logs into batches before export |
 | Processor | `resource` | Add common resource attributes (environment, cluster) |
 | Processor | `tail_sampling` | Buffered trace-outcome-aware sampling |
+| Connector | `spanmetrics` | Generate request-rate and latency histograms from sampled spans, with exemplars carrying `trace_id` for metric→trace correlation |
 | Exporter | `otlp` | Export traces to Jaeger via OTLP gRPC |
 | Exporter | `prometheusremotewrite` | Export metrics to Prometheus via remote-write |
 | Exporter | `loki` | Export logs to Loki via HTTP push |
@@ -357,7 +363,7 @@ Prometheus: http://localhost:9090 (via kubectl port-forward, started by setup)
 ./scripts/load-generator.sh
 ```
 
-Creates the k6 TestRun custom resource. k6 runs 8 virtual users for 40 minutes, split across all four endpoints. Allow 30–60 seconds for the runner pod to start and for data to populate the dashboards before beginning the demo.
+Creates the k6 TestRun custom resource. k6 runs 500 virtual users for 40 minutes (ramp-up: 30s→100 VU, 30s→250 VU, 1m→500 VU, 40m steady-state), generating ~2 500 spans/s, split across all four endpoints. Allow 30–60 seconds for the runner pod to start and for data to populate the dashboards before beginning the demo.
 
 **Step 3: Run the demo**
 
@@ -614,6 +620,34 @@ The absence of `storage: file_storage` is a known limitation of the `prometheusr
 
 Mirror of the Jaeger exporter. Both use the same file-backed queue and retry policy.
 
+#### Connectors — `spanmetrics`
+
+```yaml
+connectors:
+  spanmetrics:
+    namespace: traces
+    histogram:
+      explicit:
+        buckets: [10ms, 25ms, 50ms, 100ms, 250ms, 500ms, 1000ms, 2500ms]
+    dimensions:
+      - name: http.method
+      - name: http.status_code
+      - name: http.route
+    exemplars:
+      enabled: true
+```
+
+A **connector** acts simultaneously as an exporter and a receiver — it reads from one pipeline and injects data into another. `spanmetrics` reads the `traces` pipeline output and generates two metric families into the `metrics` pipeline:
+
+- `traces_calls_total` — counter of sampled calls, labelled by `http.method`, `http.status_code`, `http.route`, `status_code`, `service_name`, `span_name`
+- `traces_duration_milliseconds_{bucket,count,sum}` — histogram of span durations in ms, same labels, using the explicit bucket boundaries above
+
+`exemplars: enabled: true` attaches a Prometheus exemplar (a sparse annotation carrying the `trace_id`) to each histogram bucket observation. This is the mechanism that allows Grafana to render ◆ diamond markers on timeseries panels that, when clicked, open the exact trace in Jaeger.
+
+**Placement is critical:** `spanmetrics` is wired **after** `tail_sampling` in the traces pipeline (`exporters: [otlp/jaeger, spanmetrics]`). This guarantees that every `trace_id` embedded in an exemplar actually exists in Jaeger. If placed before tail sampling, ~80% of exemplar trace IDs would point to dropped traces — broken links.
+
+**Effect on the metrics pipeline:** The `metrics` pipeline has `receivers: [otlp, spanmetrics]`, meaning it receives both app metrics (from the OTLP receiver) and span-derived metrics (from the `spanmetrics` connector). All metrics are exported via `prometheusremotewrite` to Prometheus.
+
 #### Telemetry (collector self-monitoring)
 
 ```yaml
@@ -861,6 +895,23 @@ Shows four lines with relative heights reflecting the k6 load distribution: engi
 
 8 lines total (P50 + P95 × 4 routes). The `by (le, http_route)` preserves both the bucket dimension (required for quantile) and the route dimension (for per-endpoint breakdown). Expected pattern: engine/navigation ~60ms, diagnostics P50 ~600ms P95 ~1400ms, alerts ~120ms.
 
+#### Section: TRACE CORRELATION
+
+A dedicated row containing panels that use exemplars to link Prometheus metrics directly to individual traces in Jaeger.
+
+#### Panel: Sampled Request Latency
+
+| Property | Value |
+|---|---|
+| Type | Time series |
+| Unit | milliseconds |
+| P50 query (exemplar source) | `histogram_quantile(0.50, sum(rate(traces_duration_milliseconds_bucket{http_route!=""}[1m])) by (le, http_route))` with `exemplar: true` |
+| Average query | `sum(rate(traces_duration_milliseconds_sum{http_route!=""}[1m])) by (http_route) / sum(rate(traces_duration_milliseconds_count{http_route!=""}[1m])) by (http_route)` |
+
+This panel sources its exemplars from `traces_duration_milliseconds_bucket` (the histogram generated by `spanmetrics`). Each ◆ diamond represents a single sampled trace at its actual measured duration. The P50 line provides an anchor; the average line shows the mean latency of the kept (error or slow) subset. All exemplars are guaranteed ≥200ms or errors because tail sampling has already filtered the rest.
+
+Clicking a ◆ opens the exact trace in Jaeger. Exemplars are only rendered when the Prometheus data source has `exemplarTraceIdDestinations` configured (see `grafana-config.yaml`).
+
 #### Panel: Application Logs
 
 | Property | Value |
@@ -933,6 +984,19 @@ The ~86% gap between lines is structural: it reflects the traffic distribution (
 `otelcol_processor_tail_sampling_count_traces_sampled` — emitted by the tail sampler per policy. Counts **traces** (not spans). Labels: `policy` (policy name), `sampled` (true/false).
 
 Expected values: error policy ~0.013 traces/s, latency policy ~0.10 traces/s. The `or vector(0)` prevents "No data" gaps when traffic is momentarily zero.
+
+#### Panel: Sampled Calls by Endpoint
+
+| Property | Value |
+|---|---|
+| Type | Time series |
+| Unit | requests per second |
+| Error query (exemplar) | `sum(rate(traces_calls_total{status_code="STATUS_CODE_ERROR",http_route!=""}[1m])) by (http_route)` with `exemplar: true` |
+| Slow query (exemplar) | `sum(rate(traces_calls_total{status_code!="STATUS_CODE_ERROR",http_route!=""}[1m])) by (http_route)` with `exemplar: true` |
+
+Derived from `traces_calls_total` produced by the `spanmetrics` connector. Shows the call rate of **sampled** traffic only — errors and slow requests. The ◆ diamond markers are exemplars; clicking one opens the corresponding trace in Jaeger.
+
+**Note on exemplar positioning:** Exemplars on counter/rate panels appear near the bottom of the chart because their raw value is 1 (one call = one counter increment), which is much smaller than the rate on the Y-axis. The diamonds are still clickable and open valid traces — the visual position on the Y-axis is not meaningful in this case. For a more intuitive exemplar experience, use the latency panel in the TRACE CORRELATION section of the Vessel Operations dashboard.
 
 ---
 
@@ -1053,7 +1117,7 @@ The `prometheusremotewrite` exporter targets `/api/v1/write`. The remote-write e
 
 **Implication for the demo:** After restore, Jaeger has failure-window traces ✅, Loki has failure-window logs ✅, Prometheus has a visible gap in metrics ❌ (expected, documented, and itself a teaching point about signal-type differences in resilience guarantees).
 
-**Note:** `prometheusremotewrite` does not support `sending_queue.storage: file_storage` in OTel Collector v0.95. The metrics queue is in-memory only, so during a link outage, metrics are held in RAM (up to `queue_size` batches) and dropped if the outage exceeds `max_elapsed_time` (5 minutes). For the demo (2–3 min outage), no metrics are permanently lost — they resume after restore, just without the failure-window data.
+**Note:** `prometheusremotewrite` does not support `sending_queue.storage: file_storage` in the OTel Collector build used here (v0.96). The metrics queue is in-memory only, so during a link outage, metrics are held in RAM (up to `queue_size` batches) and dropped if the outage exceeds `max_elapsed_time` (5 minutes). For the demo (2–3 min outage), no metrics are permanently lost — they resume after restore, just without the failure-window data.
 
 ### 8.3 DaemonSet vs. Deployment for the OTel Collector
 
@@ -1069,7 +1133,7 @@ A DaemonSet runs exactly one pod per matching node. A Deployment with `replicas:
 
 ### 8.4 Custom OTel Collector Build
 
-`otelcol-contrib` ships 150+ components (~250 MB). This project builds a custom binary with exactly 9 components (~30 MB, 88% size reduction).
+`otelcol-contrib` ships 150+ components (~250 MB). This project builds a custom binary with exactly 10 components (~30 MB, 88% size reduction).
 
 **Benefits:** Smaller attack surface, faster startup, fully auditable component set, no code for unused exporters/receivers.
 
@@ -1194,15 +1258,17 @@ observability-on-edge/
 │       └── resources/
 │           └── otelcol-pvc.yaml        # PVC: 1Gi, civo-volume StorageClass
 │
-├── load-tests/
-│   └── k6-script.js                   # 40-min, 8 VU, 4-endpoint distribution
+├── k8s/load-test/
+│   ├── k6-script-configmap.yaml       # k6 script: 40-min, 500 VU, ~2 500 spans/s, 4-endpoint distribution
+│   └── testrun.yaml                   # k6 Operator TestRun CR (runner resources for 500 VU)
 │
 ├── scripts/
 │   ├── setup.sh                       # Cluster setup (--env local|civo)
-│   ├── load-generator.sh              # Create k6 TestRun
+│   ├── load-generator.sh              # Create k6 TestRun (500 VU, 40 min)
 │   ├── demo.sh                        # Orchestrated demo Acts 1–3
 │   ├── simulate-network-failure.sh    # Insert iptables DROP rules
 │   ├── restore-network.sh             # Remove iptables DROP rules
+│   ├── toggle-tail-sampling.sh        # Enable/disable tail sampling (OTel + Fluent Bit)
 │   └── cleanup.sh                     # Delete cluster
 │
 ├── .github/workflows/
